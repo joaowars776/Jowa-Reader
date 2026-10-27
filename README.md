@@ -5,6 +5,8 @@
 A lightweight, offline, customizable reader for EPUB, PDF, MOBI, AZW, and TXT files — built especially for webnovel and light novel fans.
 I started this project out of love for Wuxia, Xianxia, Xuanhuan and light novels in general. With sites shutting down and online access becoming fragile, I built my own 100% private and portable solution.
 
+You can also read Manhwas/manga images on this project
+
 💬 Need help? Message me on Discord: **joaowars776**
 
 ---
