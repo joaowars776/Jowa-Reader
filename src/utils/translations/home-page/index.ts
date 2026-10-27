@@ -12,6 +12,12 @@ import { arHomePage } from './ar';
 import { hiHomePage } from './hi';
 import { trHomePage } from './tr';
 import { swHomePage } from './sw';
+import { bnHomePage } from './bn';
+import { idHomePage } from './id';
+import { yoHomePage } from './yo';
+import { nlHomePage } from './nl';
+import { thHomePage } from './th';
+import { urHomePage } from './ur';
 
 export const homePageTranslations = {
   en: enHomePage,
@@ -27,5 +33,11 @@ export const homePageTranslations = {
   ar: arHomePage,
   hi: hiHomePage,
   tr: trHomePage,
-  sw: swHomePage
+  sw: swHomePage,
+  bn: bnHomePage,
+  id: idHomePage,
+  yo: yoHomePage,
+  nl: nlHomePage,
+  th: thHomePage,
+  ur: urHomePage
 };

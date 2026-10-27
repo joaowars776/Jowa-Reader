@@ -12,6 +12,12 @@ import { arReaderInterface } from './ar';
 import { hiReaderInterface } from './hi';
 import { trReaderInterface } from './tr';
 import { swReaderInterface } from './sw';
+import { bnReaderInterface } from './bn';
+import { idReaderInterface } from './id';
+import { yoReaderInterface } from './yo';
+import { nlReaderInterface } from './nl';
+import { thReaderInterface } from './th';
+import { urReaderInterface } from './ur';
 
 export const readerInterfaceTranslations = {
   en: enReaderInterface,
@@ -27,5 +33,11 @@ export const readerInterfaceTranslations = {
   ar: arReaderInterface,
   hi: hiReaderInterface,
   tr: trReaderInterface,
-  sw: swReaderInterface
+  sw: swReaderInterface,
+  bn: bnReaderInterface,
+  id: idReaderInterface,
+  yo: yoReaderInterface,
+  nl: nlReaderInterface,
+  th: thReaderInterface,
+  ur: urReaderInterface
 };

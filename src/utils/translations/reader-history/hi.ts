@@ -110,8 +110,20 @@ export const hiReaderHistory = {
   'seconds': 'सेकंड',
   'averageSession': 'औसत सत्र',
   'longestSession': 'सबसे लंबा सत्र',
-  'averageReadingTimePerDay': 'प्रतिदिन औसत पढ़ने का समय',
-  'averageReadingTimePerWeek': 'साप्ताहिक औसत पढ़ने का समय',
-  'averageReadingTimePerMonth': 'मासिक औसत पढ़ने का समय',
-  'originalText': 'मूल पाठ दिखाएं'
+  'metadata': 'मेटाडेटा',
+  'fileType': 'फ़ाइल प्रकार',
+  'genre': 'शैली',
+  'allGenres': 'सभी शैलियाँ',
+  'allTypes': 'सभी फ़ाइल प्रकार',
+  'tags': 'टैग',
+  'epub': 'EPUB',
+  'pdf': 'PDF',
+  'notMuchTimeSpent': 'अभी पढ़ने में ज्यादा समय नहीं बिताया है',
+  'youveSpent': 'आपने इस किताब को पढ़ने में',
+  'readingThisBook': 'बिताए हैं',
+  'readingInsights': 'पठन अंतर्दृष्टि',
+  'originalText': 'मूल पाठ दिखाएं',
+
+  // Added during translation migration
+  'completeChapters': 'पूर्ण अध्याय',
 };

@@ -12,6 +12,12 @@ import { arReaderHistory } from './ar';
 import { hiReaderHistory } from './hi';
 import { trReaderHistory } from './tr';
 import { swReaderHistory } from './sw';
+import { bnReaderHistory } from './bn';
+import { idReaderHistory } from './id';
+import { yoReaderHistory } from './yo';
+import { nlReaderHistory } from './nl';
+import { thReaderHistory } from './th';
+import { urReaderHistory } from './ur';
 
 export const readerHistoryTranslations = {
   en: enReaderHistory,
@@ -27,5 +33,11 @@ export const readerHistoryTranslations = {
   ar: arReaderHistory,
   hi: hiReaderHistory,
   tr: trReaderHistory,
-  sw: swReaderHistory
+  sw: swReaderHistory,
+  bn: bnReaderHistory,
+  id: idReaderHistory,
+  yo: yoReaderHistory,
+  nl: nlReaderHistory,
+  th: thReaderHistory,
+  ur: urReaderHistory
 };

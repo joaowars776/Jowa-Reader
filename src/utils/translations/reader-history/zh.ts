@@ -113,5 +113,25 @@ export const zhReaderHistory = {
   'averageReadingTimePerDay': '每日平均阅读时间',
   'averageReadingTimePerWeek': '每周平均阅读时间',
   'averageReadingTimePerMonth': '每月平均阅读时间',
-  'longestSession': '最长会话'
+  'longestSession': '最长会话',
+  'metadata': '元数据',
+  'fileType': '文件类型',
+  'genre': '类型',
+  'allGenres': '所有类型',
+  'allTypes': '所有文件类型',
+  'tags': '标签',
+  'epub': 'EPUB',
+  'pdf': 'PDF',
+  'notMuchTimeSpent': '还没有花太多时间阅读',
+  'youveSpent': '你花了',
+  'readingThisBook': '阅读这本书',
+  'readingInsights': '阅读洞察',
+  'unitDay': '天',
+  'unitHour': '小时',
+  'unitMinute': '分钟',
+  'unitSecond': '秒',
+  'andConnector': '',
+
+  // Added during translation migration
+  'completeChapters': '已完成章节',
 };

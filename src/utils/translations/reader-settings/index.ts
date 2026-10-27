@@ -12,6 +12,12 @@ import { arReaderSettings } from './ar';
 import { hiReaderSettings } from './hi';
 import { trReaderSettings } from './tr';
 import { swReaderSettings } from './sw';
+import { bnReaderSettings } from './bn';
+import { idReaderSettings } from './id';
+import { yoReaderSettings } from './yo';
+import { nlReaderSettings } from './nl';
+import { thReaderSettings } from './th';
+import { urReaderSettings } from './ur';
 
 export const readerSettingsTranslations = {
   en: enReaderSettings,
@@ -27,5 +33,11 @@ export const readerSettingsTranslations = {
   ar: arReaderSettings,
   hi: hiReaderSettings,
   tr: trReaderSettings,
-  sw: swReaderSettings
+  sw: swReaderSettings,
+  bn: bnReaderSettings,
+  id: idReaderSettings,
+  yo: yoReaderSettings,
+  nl: nlReaderSettings,
+  th: thReaderSettings,
+  ur: urReaderSettings
 };

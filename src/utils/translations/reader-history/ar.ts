@@ -113,5 +113,20 @@ export const arReaderHistory = {
   'averageReadingTimePerDay': 'متوسط وقت القراءة يوميًا',
   'averageReadingTimePerWeek': 'متوسط وقت القراءة أسبوعيًا',
   'averageReadingTimePerMonth': 'متوسط وقت القراءة شهريًا',
-  'longestSession': 'أطول جلسة'
+  'longestSession': 'أطول جلسة',
+  'metadata': 'البيانات الوصفية',
+  'fileType': 'نوع الملف',
+  'genre': 'النوع',
+  'allGenres': 'جميع الأنواع',
+  'allTypes': 'جميع أنواع الملفات',
+  'tags': 'الوسوم',
+  'epub': 'EPUB',
+  'pdf': 'PDF',
+  'notMuchTimeSpent': 'لم تقضِ الكثير من الوقت في القراءة بعد',
+  'youveSpent': 'لقد قضيت',
+  'readingThisBook': 'في قراءة هذا الكتاب',
+  'readingInsights': 'رؤى القراءة',
+
+  // Added during translation migration
+  'completeChapters': 'الفصول المكتملة',
 };

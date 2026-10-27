@@ -113,5 +113,25 @@ export const jaReaderHistory = {
   'averageReadingTimePerDay': '1日あたりの平均読書時間',
   'averageReadingTimePerWeek': '1週間あたりの平均読書時間',
   'averageReadingTimePerMonth': '1か月あたりの平均読書時間',
-  'longestSession': '最長セッション'
+  'longestSession': '最長セッション',
+  'metadata': 'メタデータ',
+  'fileType': 'ファイル形式',
+  'genre': 'ジャンル',
+  'allGenres': 'すべてのジャンル',
+  'allTypes': 'すべての形式',
+  'tags': 'タグ',
+  'epub': 'EPUB',
+  'pdf': 'PDF',
+  'notMuchTimeSpent': 'まだあまり読んでいません',
+  'youveSpent': 'この本を',
+  'readingThisBook': '読みました',
+  'readingInsights': '読書の洞察',
+  'unitDay': '日',
+  'unitHour': '時間',
+  'unitMinute': '分',
+  'unitSecond': '秒',
+  'andConnector': '',
+
+  // Added during translation migration
+  'completeChapters': '完了した章',
 };

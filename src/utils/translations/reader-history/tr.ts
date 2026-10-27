@@ -113,5 +113,20 @@ export const trReaderHistory = {
   'averageReadingTimePerDay': 'Günlük Ortalama Okuma Süresi',
   'averageReadingTimePerWeek': 'Haftalık Ortalama Okuma Süresi',
   'averageReadingTimePerMonth': 'Aylık Ortalama Okuma Süresi',
-  'longestSession': 'En Uzun Oturum'
+  'longestSession': 'En Uzun Oturum',
+  'metadata': 'Meta Veriler',
+  'fileType': 'Dosya Türü',
+  'genre': 'Tür',
+  'allGenres': 'Tüm Türler',
+  'allTypes': 'Tüm Dosya Türleri',
+  'tags': 'Etiketler',
+  'epub': 'EPUB',
+  'pdf': 'PDF',
+  'notMuchTimeSpent': 'Henüz okumak için çok zaman harcanmadı',
+  'youveSpent': 'Bu kitabı okumak için',
+  'readingThisBook': 'harcadınız',
+  'readingInsights': 'Okuma Analizleri',
+
+  // Added during translation migration
+  'completeChapters': 'Tamamlanan Bölümler',
 };

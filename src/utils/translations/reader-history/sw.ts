@@ -113,5 +113,19 @@ export const swReaderHistory = {
   'averageReadingTimePerDay': 'Muda wa wastani wa kusoma kwa siku',
   'averageReadingTimePerWeek': 'Muda wa wastani wa kusoma kwa wiki',
   'averageReadingTimePerMonth': 'Muda wa wastani wa kusoma kwa mwezi',
-  'longestSession': 'Kipindi Kirefu Zaidi'
+  'metadata': 'Metadata',
+  'fileType': 'Aina ya Faili',
+  'genre': 'Aina',
+  'allGenres': 'Aina Zote',
+  'allTypes': 'Aina Zote za Faili',
+  'tags': 'Lebo',
+  'epub': 'EPUB',
+  'pdf': 'PDF',
+  'notMuchTimeSpent': 'Bado haujatumia muda mwingi kusoma',
+  'youveSpent': 'Umetumia',
+  'readingThisBook': 'kusoma kitabu hiki',
+  'readingInsights': 'Maarifa ya Kusoma',
+
+  // Added during translation migration
+  'completeChapters': 'Sura Zilizokamilika',
 };
