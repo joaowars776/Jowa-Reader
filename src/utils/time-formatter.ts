@@ -1,38 +1,54 @@
 import type { TimeFormat } from '../types';
+import { getTranslation, getCurrentLanguage } from './translations';
 
 export const formatDuration = (milliseconds: number, format: TimeFormat = 'auto'): string => {
-  if (milliseconds === 0) return '0 minutes';
+  if (milliseconds === 0) return `0 ${getTranslation('minutes').toLowerCase()}`;
 
   const seconds = Math.floor(milliseconds / 1000);
   const minutes = Math.floor(seconds / 60);
   const hours = Math.floor(minutes / 60);
   const days = Math.floor(hours / 24);
 
+  const getPlural = (value: number, key: string) => {
+    const translation = getTranslation(key);
+    // Simple pluralization for English, others might need more complex logic
+    // but we'll stick to the provided keys for now
+    if (value === 1) {
+      if (key === 'minutes') return getTranslation('minute').toLowerCase();
+      if (key === 'hours') return getTranslation('hour').toLowerCase();
+      if (key === 'days') return getTranslation('day').toLowerCase();
+      if (key === 'seconds') return getTranslation('second').toLowerCase();
+    }
+    return translation.toLowerCase();
+  };
+
   switch (format) {
     case 'minutes':
-      return `${Math.ceil(milliseconds / (1000 * 60))} minutes`;
+      return `${Math.ceil(milliseconds / (1000 * 60))} ${getPlural(Math.ceil(milliseconds / (1000 * 60)), 'minutes')}`;
     
     case 'hours': {
       const totalHours = milliseconds / (1000 * 60 * 60);
-      return `${totalHours.toFixed(1)} hours`;
+      return `${totalHours.toFixed(1)} ${getPlural(totalHours, 'hours')}`;
     }
     case 'detailed': {
       const parts: string[] = [];
-      if (days > 0) parts.push(`${days} day${days !== 1 ? 's' : ''}`);
-      if (hours % 24 > 0) parts.push(`${hours % 24} hour${hours % 24 !== 1 ? 's' : ''}`);
-      if (minutes % 60 > 0) parts.push(`${minutes % 60} minute${minutes % 60 !== 1 ? 's' : ''}`);
-      return parts.join(', ') || '0 minutes';
+      if (days > 0) parts.push(`${days} ${getPlural(days, 'days')}`);
+      if (hours % 24 > 0) parts.push(`${hours % 24} ${getPlural(hours % 24, 'hours')}`);
+      if (minutes % 60 > 0) parts.push(`${minutes % 60} ${getPlural(minutes % 60, 'minutes')}`);
+      return parts.join(', ') || `0 ${getTranslation('minutes').toLowerCase()}`;
     }
     case 'auto':
     default:
       if (days > 0) {
-        return `${days} day${days !== 1 ? 's' : ''} ${hours % 24}h`;
+        const h = hours % 24;
+        return `${days} ${getPlural(days, 'days')}${h > 0 ? `${getTranslation('andConnector')}${h} ${getPlural(h, 'hours')}` : ''}`;
       } else if (hours > 0) {
-        return `${hours} hour${hours !== 1 ? 's' : ''} ${minutes % 60}m`;
+        const m = minutes % 60;
+        return `${hours} ${getPlural(hours, 'hours')}${m > 0 ? `${getTranslation('andConnector')}${m} ${getPlural(m, 'minutes')}` : ''}`;
       } else if (minutes > 0) {
-        return `${minutes} minute${minutes !== 1 ? 's' : ''}`;
+        return `${minutes} ${getPlural(minutes, 'minutes')}`;
       } else {
-        return `${seconds} second${seconds !== 1 ? 's' : ''}`;
+        return `${seconds} ${getPlural(seconds, 'seconds')}`;
       }
   }
 };
@@ -43,11 +59,11 @@ export const formatShortDuration = (milliseconds: number): string => {
   const days = Math.floor(hours / 24);
 
   if (days > 0) {
-    return `${days}d ${hours % 24}h`;
+    return `${days}${getTranslation('unitDay')} ${hours % 24}${getTranslation('unitHour')}`;
   } else if (hours > 0) {
-    return `${hours}h ${minutes % 60}m`;
+    return `${hours}${getTranslation('unitHour')} ${minutes % 60}${getTranslation('unitMinute')}`;
   } else {
-    return `${minutes}m`;
+    return `${minutes}${getTranslation('unitMinute')}`;
   }
 };
 
@@ -61,7 +77,7 @@ export const formatTimeRange = (startTime: Date, endTime: Date): string => {
   if (startDate === endDate) {
     return `${start} - ${end}`;
   } else {
-    return `${startTime.toLocaleDateString()} ${start} - ${endTime.toLocaleDateString()} ${end}`;
+    return `${formatLocalizedDate(startTime)} ${start} - ${formatLocalizedDate(endTime)} ${end}`;
   }
 };
 
@@ -73,15 +89,19 @@ export const formatRelativeTime = (date: Date): string => {
   const diffDays = Math.floor(diffHours / 24);
 
   if (diffMinutes < 1) {
-    return 'Just now';
+    return getTranslation('justNow');
   } else if (diffMinutes < 60) {
-    return `${diffMinutes} minute${diffMinutes !== 1 ? 's' : ''} ago`;
+    const unit = diffMinutes === 1 ? getTranslation('minute').toLowerCase() : getTranslation('minutes').toLowerCase();
+    return `${diffMinutes} ${unit} ${getTranslation('ago') || 'ago'}`;
   } else if (diffHours < 24) {
-    return `${diffHours} hour${diffHours !== 1 ? 's' : ''} ago`;
+    const unit = diffHours === 1 ? getTranslation('hour').toLowerCase() : getTranslation('hours').toLowerCase();
+    return `${diffHours} ${unit} ${getTranslation('ago') || 'ago'}`;
   } else if (diffDays < 7) {
-    return `${diffDays} day${diffDays !== 1 ? 's' : ''} ago`;
+    const unit = diffDays === 1 ? getTranslation('day').toLowerCase() : getTranslation('days').toLowerCase();
+    return `${diffDays} ${unit} ${getTranslation('ago') || 'ago'}`;
   } else {
-    return date.toLocaleDateString();
+    const currentLang = getCurrentLanguage();
+    return date.toLocaleDateString(currentLang === 'zh' ? 'zh-CN' : currentLang === 'ja' ? 'ja-JP' : currentLang);
   }
 };
 
@@ -90,10 +110,21 @@ export const getReadingTimeMessage = (totalTime: number): string => {
   const minutes = Math.floor((totalTime % (1000 * 60 * 60)) / (1000 * 60));
 
   if (hours > 0) {
-    return `You've spent ${hours} hour${hours !== 1 ? 's' : ''} ${minutes > 0 ? `${minutes} minute${minutes !== 1 ? 's' : ''}` : ''} reading this book`;
+    const hUnit = hours === 1 ? getTranslation('hour').toLowerCase() : getTranslation('hours').toLowerCase();
+    const mUnit = minutes === 1 ? getTranslation('minute').toLowerCase() : getTranslation('minutes').toLowerCase();
+    return `${getTranslation('youveSpent')} ${hours} ${hUnit} ${minutes > 0 ? `${minutes} ${mUnit}` : ''} ${getTranslation('readingThisBook')}`;
   } else if (minutes > 0) {
-    return `You've spent ${minutes} minute${minutes !== 1 ? 's' : ''} reading this book`;
+    const mUnit = minutes === 1 ? getTranslation('minute').toLowerCase() : getTranslation('minutes').toLowerCase();
+    return `${getTranslation('youveSpent')} ${minutes} ${mUnit} ${getTranslation('readingThisBook')}`;
   } else {
-    return 'You haven\'t spent much time reading this book yet';
+    return getTranslation('notMuchTimeSpent');
   }
+};
+
+export const formatLocalizedDate = (dateInput: Date | string | number): string => {
+  const date = new Date(dateInput);
+  if (isNaN(date.getTime())) return '';
+  const currentLang = getCurrentLanguage();
+  const locale = currentLang === 'pt' ? 'pt-BR' : currentLang === 'zh' ? 'zh-CN' : currentLang === 'ja' ? 'ja-JP' : currentLang;
+  return date.toLocaleDateString(locale);
 };

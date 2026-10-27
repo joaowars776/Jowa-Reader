@@ -1,54 +1,56 @@
 import React, { useState, useEffect } from 'react';
 import { Calendar, TrendingUp, BarChart3, Clock } from 'lucide-react';
 import { getReadingTrends } from '../../utils/reading-tracker';
-import { formatDuration, formatShortDuration } from '../../utils/time-formatter';
-import { getTranslation } from '../../utils/translations';
+import { formatDuration, formatShortDuration, formatLocalizedDate } from '../../utils/time-formatter';
+import { getTranslation, getCurrentLanguage } from '../../utils/translations';
+import { getInterfaceTheme } from '../../utils/themes';
 import type { ReadingTrend, TimeFormat, ReadingPreferences } from '../../types';
 
 interface ReadingTrendsChartProps {
   timeFormat: TimeFormat;
   preferences?: ReadingPreferences;
+  selectedBookId?: string;
 }
 
-export const ReadingTrendsChart: React.FC<ReadingTrendsChartProps> = ({ timeFormat, preferences }) => {
+export const ReadingTrendsChart: React.FC<ReadingTrendsChartProps> = ({ preferences, selectedBookId }) => {
   const [trends, setTrends] = useState<ReadingTrend[]>([]);
   const [period, setPeriod] = useState<number>(30);
   const [isLoading, setIsLoading] = useState(true);
 
-  useEffect(() => {
-    loadTrends();
-  }, [period]);
-
-  const loadTrends = async () => {
+  const loadTrends = React.useCallback(async () => {
     try {
       setIsLoading(true);
-      const trendData = await getReadingTrends(period);
+      const trendData = await getReadingTrends(period, selectedBookId);
       setTrends(trendData);
     } catch (error) {
       console.error('Error loading reading trends:', error);
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [period, selectedBookId]);
+
+  useEffect(() => {
+    loadTrends();
+  }, [loadTrends]);
 
   // Get interface theme styles
   const getInterfaceStyles = () => {
-    if (!preferences?.interfaceColors) {
-      return {
-        backgroundColor: '#ffffff',
-        color: '#1f2937',
-        borderColor: '#e5e7eb',
-        panelBackground: '#ffffff',
-        panelSecondaryBackground: '#f9fafb'
-      };
-    }
+    const themeId = preferences?.selectedInterfaceTheme || 'light';
+    const subTheme = preferences?.snowSubTheme || 'day';
+    const menuStyle = preferences?.menuStyle || 'classic';
+    const theme = getInterfaceTheme(themeId, subTheme, menuStyle);
+    
+    const colors = themeId === 'custom' && preferences?.interfaceColors 
+      ? preferences.interfaceColors 
+      : theme.colors;
 
     return {
-      backgroundColor: preferences.interfaceColors.headerBackground || '#ffffff',
-      color: preferences.interfaceColors.headerText || '#1f2937',
-      borderColor: preferences.interfaceColors.headerBorder || '#e5e7eb',
-      panelBackground: preferences.interfaceColors.panelBackground || '#ffffff',
-      panelSecondaryBackground: preferences.interfaceColors.panelSecondaryBackground || '#f9fafb'
+      backgroundColor: colors.headerBackground || '#ffffff',
+      color: colors.headerText || '#1f2937',
+      borderColor: colors.headerBorder || '#e5e7eb',
+      panelBackground: colors.panelBackground || '#ffffff',
+      panelSecondaryBackground: colors.panelSecondaryBackground || '#f9fafb',
+      accent: colors.accent || '#007BFF'
     };
   };
 
@@ -76,7 +78,9 @@ export const ReadingTrendsChart: React.FC<ReadingTrendsChartProps> = ({ timeForm
 
   const formatDate = (dateStr: string) => {
     const date = new Date(dateStr);
-    return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
+    const currentLang = getCurrentLanguage();
+    const locale = currentLang === 'pt' ? 'pt-BR' : currentLang === 'zh' ? 'zh-CN' : currentLang === 'ja' ? 'ja-JP' : currentLang;
+    return date.toLocaleDateString(locale, { month: 'short', day: 'numeric' });
   };
 
   const getDayOfWeek = (dateStr: string) => {
@@ -238,7 +242,7 @@ export const ReadingTrendsChart: React.FC<ReadingTrendsChartProps> = ({ timeForm
             {/* Chart */}
             <div className="relative">
               <div className="flex items-end justify-between h-64 px-2">
-                {trends.map((trend, index) => (
+                {trends.map((trend) => (
                   <div key={trend.date} className="flex flex-col items-center group relative">
                     {/* Bar */}
                     <div
@@ -256,7 +260,7 @@ export const ReadingTrendsChart: React.FC<ReadingTrendsChartProps> = ({ timeForm
                       className="absolute bottom-full mb-2 left-1/2 transform -translate-x-1/2 text-white text-xs rounded py-2 px-3 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-10"
                       style={{ backgroundColor: '#1f2937' }}
                     >
-                      <div className="font-medium">{new Date(trend.date).toLocaleDateString()}</div>
+                      <div className="font-medium">{formatLocalizedDate(trend.date)}</div>
                       <div>{getTranslation('time')}: {formatShortDuration(trend.totalTime)}</div>
                       <div>{getTranslation('sessions')}: {trend.sessionsCount}</div>
                       <div>{getTranslation('chaptersTotal')}: {trend.chaptersCompleted}</div>

@@ -1,4 +1,5 @@
 import { initDB } from './storage';
+import { logActivity } from './activity-logger';
 import type { ReadingSession, ChapterHistory, BookHistory, ReadingTrend, ReadingHistoryStats } from '../types';
 
 // Reading session tracking
@@ -9,6 +10,8 @@ let currentSession: {
   chapterIndex: number;
   chapterTitle: string;
   startTime: Date;
+  fileType?: 'epub' | 'pdf' | 'txt' | 'mobi' | 'azw3' | 'kfx' | 'azw';
+  tags?: string[];
 } | null = null;
 
 let sessionTimer: NodeJS.Timeout | null = null;
@@ -21,7 +24,9 @@ export const startReadingSession = (
   bookTitle: string,
   bookAuthor: string,
   chapterIndex: number,
-  chapterTitle: string
+  chapterTitle: string,
+  fileType?: 'epub' | 'pdf' | 'txt' | 'mobi' | 'azw3' | 'kfx' | 'azw',
+  tags?: string[]
 ) => {
   // End previous session if exists
   if (currentSession) {
@@ -34,8 +39,18 @@ export const startReadingSession = (
     bookAuthor,
     chapterIndex,
     chapterTitle,
-    startTime: new Date()
+    startTime: new Date(),
+    fileType,
+    tags
   };
+
+  logActivity({
+    type: 'read_chapter',
+    bookId,
+    bookTitle,
+    chapterTitle,
+    chapterIndex
+  });
 
   lastActivityTime = Date.now();
 
@@ -107,7 +122,9 @@ export const endReadingSession = async (completed: boolean = false) => {
       startTime: currentSession.startTime,
       endTime,
       duration,
-      completed
+      completed,
+      fileType: currentSession.fileType,
+      tags: currentSession.tags
     };
 
     await saveReadingSession(session);
@@ -135,6 +152,8 @@ export const changeChapter = async (
   const bookId = currentSession.bookId;
   const bookTitle = currentSession.bookTitle;
   const bookAuthor = currentSession.bookAuthor;
+  const fileType = currentSession.fileType;
+  const tags = currentSession.tags;
 
   // End current chapter session
   await endReadingSession(completed);
@@ -145,7 +164,9 @@ export const changeChapter = async (
     bookTitle,
     bookAuthor,
     chapterIndex,
-    chapterTitle
+    chapterTitle,
+    fileType,
+    tags
   );
 };
 
@@ -212,7 +233,9 @@ export const getChapterHistory = async (bookId?: string): Promise<ChapterHistory
         firstRead: session.startTime,
         lastRead: session.endTime,
         timesRead: 1,
-        completed: session.completed
+        completed: session.completed,
+        fileType: session.fileType,
+        tags: session.tags
       });
     }
   });
@@ -245,7 +268,9 @@ export const getBookHistory = async (): Promise<BookHistory[]> => {
         chaptersRead: 1,
         totalChapters: 0, // Will be updated when we have book data
         completionPercentage: 0,
-        sessions: [session]
+        sessions: [session],
+        fileType: session.fileType,
+        tags: session.tags
       });
     }
   });
@@ -253,8 +278,11 @@ export const getBookHistory = async (): Promise<BookHistory[]> => {
   return Array.from(bookMap.values()).sort((a, b) => b.lastRead.getTime() - a.lastRead.getTime());
 };
 
-export const getReadingTrends = async (days: number = 30): Promise<ReadingTrend[]> => {
-  const sessions = await getReadingSessions();
+export const getReadingTrends = async (days: number = 30, bookId?: string): Promise<ReadingTrend[]> => {
+  let sessions = await getReadingSessions();
+  if (bookId && bookId !== 'all') {
+    sessions = sessions.filter(session => session.bookId === bookId);
+  }
   const trendMap = new Map<string, ReadingTrend>();
 
   const endDate = new Date();
@@ -293,9 +321,14 @@ export const getReadingTrends = async (days: number = 30): Promise<ReadingTrend[
   return Array.from(trendMap.values()).sort((a, b) => a.date.localeCompare(b.date));
 };
 
-export const getReadingHistoryStats = async (): Promise<ReadingHistoryStats> => {
-  const sessions = await getReadingSessions();
-  const bookHistory = await getBookHistory();
+export const getReadingHistoryStats = async (bookId?: string): Promise<ReadingHistoryStats> => {
+  let sessions = await getReadingSessions();
+  let bookHistory = await getBookHistory();
+
+  if (bookId && bookId !== 'all') {
+    sessions = sessions.filter(session => session.bookId === bookId);
+    bookHistory = bookHistory.filter(book => book.bookId === bookId);
+  }
   
   if (sessions.length === 0) {
     return {
@@ -324,7 +357,7 @@ export const getReadingHistoryStats = async (): Promise<ReadingHistoryStats> => 
   const { currentStreak, longestStreak } = calculateReadingStreaks(sessions);
 
   // Calculate averages
-  const trends = await getReadingTrends(90); // Last 90 days
+  const trends = await getReadingTrends(90, bookId); // Last 90 days for this book or all books
   const dailyTimes = trends.map(trend => trend.totalTime);
   const dailyAverage = dailyTimes.reduce((sum, time) => sum + time, 0) / dailyTimes.length;
   const weeklyAverage = dailyAverage * 7;
@@ -366,7 +399,7 @@ const calculateReadingStreaks = (sessions: ReadingSession[]): { currentStreak: n
 
   // Calculate current streak
   if (dateMap.has(today) || dateMap.has(yesterday)) {
-    let checkDate = new Date();
+    const checkDate = new Date();
     if (!dateMap.has(today)) {
       checkDate.setDate(checkDate.getDate() - 1);
     }

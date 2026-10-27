@@ -3,6 +3,7 @@ import { Clock, BookOpen, TrendingUp, Target, Award, Calendar, Zap, BarChart3, A
 import { formatDuration } from '../../utils/time-formatter';
 import { getTranslation } from '../../utils/translations';
 import type { ReadingHistoryStats, TimeFormat, ReadingPreferences } from '../../types';
+import { getInterfaceTheme } from '../../utils/themes';
 
 interface OverallStatsViewProps {
   stats: ReadingHistoryStats;
@@ -16,22 +17,22 @@ export const OverallStatsView: React.FC<OverallStatsViewProps> = ({ stats, timeF
 
   // Get interface theme styles
   const getInterfaceStyles = () => {
-    if (!preferences?.interfaceColors) {
-      return {
-        backgroundColor: '#ffffff',
-        color: '#1f2937',
-        borderColor: '#e5e7eb',
-        panelBackground: '#ffffff',
-        panelSecondaryBackground: '#f9fafb'
-      };
-    }
+    const themeId = preferences?.selectedInterfaceTheme || 'light';
+    const subTheme = preferences?.snowSubTheme || 'day';
+    const menuStyle = preferences?.menuStyle || 'classic';
+    const theme = getInterfaceTheme(themeId, subTheme, menuStyle);
+    
+    const colors = themeId === 'custom' && preferences?.interfaceColors 
+      ? preferences.interfaceColors 
+      : theme.colors;
 
     return {
-      backgroundColor: preferences.interfaceColors.headerBackground || '#ffffff',
-      color: preferences.interfaceColors.headerText || '#1f2937',
-      borderColor: preferences.interfaceColors.headerBorder || '#e5e7eb',
-      panelBackground: preferences.interfaceColors.panelBackground || '#ffffff',
-      panelSecondaryBackground: preferences.interfaceColors.panelSecondaryBackground || '#f9fafb'
+      backgroundColor: colors.headerBackground || '#ffffff',
+      color: colors.headerText || '#1f2937',
+      borderColor: colors.headerBorder || '#e5e7eb',
+      panelBackground: colors.panelBackground || '#ffffff',
+      panelSecondaryBackground: colors.panelSecondaryBackground || '#f9fafb',
+      accent: colors.accent || '#007BFF'
     };
   };
 

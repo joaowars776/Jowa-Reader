@@ -129,12 +129,13 @@ class DragDropController {
    */
   private handleDragStart = (e: DragEvent): void => {
     const target = e.target as Element;
+    if (!target || typeof target.hasAttribute !== 'function') return;
     
     // Prevent dragging of images, text, and other elements unless explicitly allowed
     if (target.tagName === 'IMG' || 
         target.tagName === 'A' || 
         target.hasAttribute('draggable') === false ||
-        target.closest('[data-no-drag]')) {
+        (typeof target.closest === 'function' && target.closest('[data-no-drag]'))) {
       e.preventDefault();
       e.stopPropagation();
     }
@@ -144,6 +145,7 @@ class DragDropController {
    * Check if the target is a valid drop zone
    */
   private isValidDropZone(target: Element): boolean {
+    if (!target) return false;
     // Check if target or any parent has drag-drop related classes or attributes
     const dropZoneSelectors = [
       '[data-drop-zone]',
@@ -155,7 +157,8 @@ class DragDropController {
     ];
 
     return dropZoneSelectors.some(selector => 
-      target.matches?.(selector) || target.closest?.(selector)
+      (typeof target.matches === 'function' && target.matches(selector)) || 
+      (typeof target.closest === 'function' && target.closest(selector))
     );
   }
 

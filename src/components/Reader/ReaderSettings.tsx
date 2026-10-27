@@ -1,17 +1,25 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { X, Palette, Monitor, Eye, EyeOff, RotateCcw, Globe, Layers, BookOpen, Settings as SettingsIcon, Volume2 } from 'lucide-react';
-import { COLOR_THEMES, INTERFACE_THEMES, getColorTheme, getInterfaceTheme } from '../../utils/themes';
+import { X, Monitor, Eye, RotateCcw, Globe, Settings as SettingsIcon, Download } from 'lucide-react';
+import { INTERFACE_THEMES, COLOR_THEMES, getColorTheme, getInterfaceTheme, isHexColorDark } from '../../utils/themes';
 import { LanguageSelector } from '../LanguageSelector';
-import { getTranslation } from '../../utils/translations';
-import { resetToDefaults } from '../../utils/storage';
-import type { ReadingPreferences, ColorTheme, InterfaceTheme } from '../../types';
+import { useTranslations } from '../../hooks/useTranslations';
+import { otherUsersBooksTranslations } from '../../utils/translations/other-users-books';
+import { getCurrentLanguage } from '../../utils/translations';
+import { resetToDefaults, exportUserData } from '../../utils/storage';
+import { ImportDataModal } from '../ImportDataModal';
+import { SettingsAppearanceTab } from './SettingsAppearanceTab';
+import { SettingsBehaviorTab } from './SettingsBehaviorTab';
+import { SettingsAdvancedTab } from './SettingsAdvancedTab';
+import type { ReadingPreferences } from '../../types';
+import { InterfaceEffectsOverlay } from './InterfaceEffectsOverlay';
 
 interface ReaderSettingsProps {
   preferences: ReadingPreferences;
   onPreferencesChange: (preferences: ReadingPreferences) => void;
   onClose: () => void;
   pdfMode?: boolean;
+  initialTab?: 'appearance' | 'behavior' | 'advanced';
 }
 
 // Default values for comparison
@@ -19,8 +27,10 @@ const DEFAULT_VALUES = {
   fontSize: 38,
   lineHeight: 1.6,
   marginSize: 0.5,
-  fontFamily: 'Inter',
-  maxWidth: 'full',
+  fontFamily: 'Arial',
+  customFontUrl: '',
+  customFontName: '',
+  maxWidth: 'custom',
   scrollButtons: { visible: false, size: 'medium', customSize: 48 },
   cornerNavigation: { visible: false },
   syncInterfaceWithReading: true,
@@ -29,33 +39,64 @@ const DEFAULT_VALUES = {
   themeApplyMode: 'both',
   iconVisibility: {
     showSearchIcon: true,
-    showBookmarkIcon: true, // Default to true
+    showBookmarkIcon: true,
     showFavoriteIcon: true,
-    showShareIcon: false, // Updated default
-    showFullscreenIcon: false, // Updated default
-    showShortcutsIcon: true // Default to true
+    showShareIcon: false,
+    showFullscreenIcon: false,
+    showShortcutsIcon: true,
+    showTranslateIcon: true
   },
   enableTextToSpeech: false,
+  paragraphSpacing: 1.5,
+  fixedTopBar: true,
+  bookmarkHighlight: {
+    color: '#fef08a',
+    style: 'highlight'
+  }
 };
 
 export const ReaderSettings: React.FC<ReaderSettingsProps> = ({
   preferences,
   onPreferencesChange,
   onClose,
-  pdfMode = false
+  pdfMode = false,
+  initialTab
 }) => {
+  const { getTranslation, language } = useTranslations();
+  const getLocalTranslation = (key: string) => {
+    const lang = getCurrentLanguage();
+    const dict = otherUsersBooksTranslations;
+    return dict[lang]?.[key] || dict['en']?.[key] || getTranslation(key);
+  };
   const panelRef = useRef<HTMLDivElement>(null);
   const [showLanguageSelector, setShowLanguageSelector] = useState(false);
+  const [isFontFamilyExpanded, setIsFontFamilyExpanded] = useState(true);
+  const [isColorThemeExpanded, setIsColorThemeExpanded] = useState(true);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
-  const [themeApplyMode, setThemeApplyMode] = useState<'both' | 'interface' | 'reader'>('both');
-  const [activeTab, setActiveTab] = useState<'appearance' | 'behavior' | 'advanced'>('appearance');
+  const [resetCountdown, setResetCountdown] = useState(3);
+  const [isResetting, setIsResetting] = useState(false);
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [themeApplyMode, setThemeApplyMode] = useState<'both' | 'interface' | 'reader'>(
+    preferences?.themeApplyMode || 'both'
+  );
+  const [activeTab, setActiveTab] = useState<'appearance' | 'behavior' | 'advanced'>(initialTab || 'appearance');
+  const [activeThemeTab, setActiveThemeTab] = useState<'color' | 'menu'>('color');
 
-  
+  // Sync themeApplyMode state when preferences prop changes
+  useEffect(() => {
+    if (preferences?.themeApplyMode) {
+      setThemeApplyMode(preferences.themeApplyMode);
+    }
+  }, [preferences?.themeApplyMode]);
 
   // Close when clicking outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (panelRef.current && !panelRef.current.contains(event.target as Node)) {
+        const target = event.target as HTMLElement;
+        if (target.closest('[data-import-modal]') || target.closest('[data-reset-modal]')) {
+          return;
+        }
         onClose();
       }
     };
@@ -66,27 +107,61 @@ export const ReaderSettings: React.FC<ReaderSettingsProps> = ({
     };
   }, [onClose]);
 
-  // Get interface theme styles
-  const getInterfaceStyles = () => {
-    if (!preferences?.interfaceColors) {
-      return {
-        backgroundColor: '#ffffff',
-        color: '#1f2937',
-        borderColor: '#e5e7eb'
-      };
-    }
+  // Get interface theme styles memoized for optimal rendering performance
+  const interfaceStyles = useMemo(() => {
+    const themeId = preferences?.selectedInterfaceTheme || 'light';
+    const subTheme = preferences?.snowSubTheme || 'night';
+    const menuStyle = preferences?.menuStyle || 'classic';
+    const menuSubTheme = preferences?.menuSubTheme || 'default';
+    const neonCustomColor = preferences?.neonCustomColor;
+    const glassEnabled = (preferences?.glassEnabled ?? false) && !(preferences?.glassReaderAreaOnly ?? false);
+    const glassTintColor = preferences?.glassTintColor;
+    
+    const theme = getInterfaceTheme(
+      themeId,
+      subTheme,
+      menuStyle,
+      preferences?.linkStyleWithTheme !== false,
+      menuSubTheme,
+      neonCustomColor,
+      glassEnabled,
+      glassTintColor
+    );
+    
+    const colors = themeId === 'custom' && preferences?.interfaceColors 
+      ? preferences.interfaceColors 
+      : theme.colors;
+
+    const isDark = isHexColorDark(colors.panelBackground || '#ffffff');
+    const accentColor = colors.accent || '#007BFF';
 
     return {
-      backgroundColor: preferences.interfaceColors.panelBackground || '#ffffff',
-      color: preferences.interfaceColors.panelText || '#1f2937',
-      borderColor: preferences.interfaceColors.borderColor || '#e5e7eb'
+      backgroundColor: colors.panelBackground || '#ffffff',
+      color: colors.panelText || colors.textPrimary || (isDark ? '#f9fafb' : '#1f2937'),
+      borderColor: colors.borderColor || (isDark ? 'rgba(255, 255, 255, 0.15)' : '#e5e7eb'),
+      panelBackground: colors.panelBackground || '#ffffff',
+      panelSecondaryBackground: colors.panelSecondaryBackground || (isDark ? '#111827' : '#f9fafb'),
+      accent: accentColor,
+      textSecondary: colors.textSecondary || (isDark ? '#cbd5e1' : '#6b7280'),
+      inputBackground: colors.inputBackground || (isDark ? 'rgba(0, 0, 0, 0.35)' : '#ffffff'),
+      inputText: colors.inputText || (isDark ? '#ffffff' : '#1f2937'),
+      isDark
     };
-  };
-
-  const interfaceStyles = getInterfaceStyles();
+  }, [
+    preferences?.selectedInterfaceTheme,
+    preferences?.snowSubTheme,
+    preferences?.menuStyle,
+    preferences?.linkStyleWithTheme,
+    preferences?.menuSubTheme,
+    preferences?.neonCustomColor,
+    preferences?.glassEnabled,
+    preferences?.glassReaderAreaOnly,
+    preferences?.glassTintColor,
+    preferences?.interfaceColors
+  ]);
 
   // Check if value is default
-  const isDefault = (key: string, value: unknown) => {
+  const isDefault = useCallback((key: string, value: unknown) => {
     if (key === 'scrollButtons') {
       return JSON.stringify(value) === JSON.stringify(DEFAULT_VALUES.scrollButtons);
     }
@@ -100,77 +175,228 @@ export const ReaderSettings: React.FC<ReaderSettingsProps> = ({
       return JSON.stringify(value) === JSON.stringify(DEFAULT_VALUES.iconVisibility);
     }
     return DEFAULT_VALUES[key as keyof typeof DEFAULT_VALUES] === value;
-  };
+  }, []);
+
+  // Ref to track scheduled animation frame for slider updates
+  const sliderUpdateTimeoutRef = useRef<number | null>(null);
 
   // Slider functionality
-  const handleSliderChange = (key: keyof ReadingPreferences, value: number) => {
-    onPreferencesChange({
-      ...preferences,
-      [key]: value
+  const handleSliderChange = useCallback((key: keyof ReadingPreferences, value: number) => {
+    if (sliderUpdateTimeoutRef.current) {
+      cancelAnimationFrame(sliderUpdateTimeoutRef.current);
+    }
+    sliderUpdateTimeoutRef.current = requestAnimationFrame(() => {
+      const updatedPreferences: any = {
+        ...preferences,
+        [key]: value
+      };
+
+      if (key === 'marginSize') {
+        updatedPreferences.maxWidth = 'custom';
+      }
+
+      onPreferencesChange(updatedPreferences);
     });
-  };
+  }, [preferences, onPreferencesChange]);
 
-  const handleColorThemeChange = (themeId: string) => {
-    const theme = getColorTheme(themeId);
-    const updatedPreferences = {
+  // Clean up animation frame on unmount
+  useEffect(() => {
+    return () => {
+      if (sliderUpdateTimeoutRef.current) {
+        cancelAnimationFrame(sliderUpdateTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  const generateInterfaceColors = useCallback((background: string, text: string) => {
+    const baseTheme = INTERFACE_THEMES.find(t => t.id === 'custom') || INTERFACE_THEMES[0];
+    const baseColors = { ...baseTheme.colors };
+    
+    baseColors.headerBackground = background;
+    baseColors.panelBackground = background;
+    baseColors.panelSecondaryBackground = background;
+    baseColors.inputBackground = background;
+    
+    baseColors.headerText = text;
+    baseColors.panelText = text;
+    baseColors.inputText = text;
+    baseColors.textPrimary = text;
+    baseColors.textSecondary = text;
+    baseColors.textMuted = text;
+    baseColors.buttonPrimaryText = background;
+    baseColors.buttonSecondaryText = text;
+    
+    baseColors.panelBorder = text;
+    baseColors.headerBorder = text;
+    baseColors.inputBorder = text;
+    baseColors.divider = text;
+    baseColors.borderColor = text;
+    
+    return baseColors;
+  }, []);
+
+  const handleColorThemeChange = useCallback((themeId: string) => {
+    const theme = getColorTheme(themeId, preferences.snowSubTheme || 'night');
+    
+    const updatedPreferences: ReadingPreferences = {
       ...preferences,
-      selectedColorTheme: themeId,
-      useThemeBasedColors: themeId !== 'custom'
     };
 
-    // Apply based on mode
     if (themeApplyMode === 'both' || themeApplyMode === 'reader') {
-      updatedPreferences.colors = theme.colors;
-    }
-
-    if (themeApplyMode === 'both' || themeApplyMode === 'interface') {
-      const matchingInterfaceTheme = INTERFACE_THEMES.find(interfaceTheme => interfaceTheme.id === themeId);
-      if (matchingInterfaceTheme) {
-        updatedPreferences.selectedInterfaceTheme = themeId;
-        updatedPreferences.interfaceColors = matchingInterfaceTheme.colors;
+      updatedPreferences.selectedColorTheme = themeId;
+      updatedPreferences.theme = themeId as any;
+      updatedPreferences.useThemeBasedColors = themeId !== 'custom';
+      if (themeId === 'custom' && preferences.customColors) {
+        updatedPreferences.colors = preferences.customColors;
+      } else {
+        updatedPreferences.colors = theme.colors;
       }
     }
 
-    onPreferencesChange(updatedPreferences);
-  };
+    if (themeApplyMode === 'both' || themeApplyMode === 'interface') {
+      let interfaceThemeColors;
+      if (themeId === 'custom') {
+        const background = preferences.customInterfaceColors?.panelBackground || '#ffffff';
+        const text = preferences.customInterfaceColors?.panelText || '#1f2937';
+        interfaceThemeColors = generateInterfaceColors(background, text);
+      } else {
+        interfaceThemeColors = getInterfaceTheme(
+          themeId,
+          preferences.snowSubTheme || 'night',
+          preferences.menuStyle || 'classic',
+          preferences.linkStyleWithTheme !== false
+        ).colors;
+      }
+      updatedPreferences.selectedInterfaceTheme = themeId;
+      updatedPreferences.interfaceTheme = themeId as any;
+      updatedPreferences.interfaceColors = interfaceThemeColors;
+    }
 
-  const handleInterfaceThemeChange = (themeId: string) => {
-    const theme = getInterfaceTheme(themeId);
-    const updatedPreferences = {
+    onPreferencesChange(updatedPreferences);
+  }, [preferences, onPreferencesChange, themeApplyMode, generateInterfaceColors]);
+
+  const handleInterfaceThemeChange = useCallback((themeId: string) => {
+    let interfaceThemeColors;
+    if (themeId === 'custom') {
+      const background = preferences.customInterfaceColors?.panelBackground || '#ffffff';
+      const text = preferences.customInterfaceColors?.panelText || '#1f2937';
+      interfaceThemeColors = generateInterfaceColors(background, text);
+    } else {
+      interfaceThemeColors = getInterfaceTheme(
+        themeId,
+        preferences.snowSubTheme || 'night',
+        preferences.menuStyle || 'classic',
+        preferences.linkStyleWithTheme !== false
+      ).colors;
+    }
+
+    const updatedPreferences: ReadingPreferences = {
       ...preferences,
-      selectedInterfaceTheme: themeId
     };
 
-    // Apply based on mode
     if (themeApplyMode === 'both' || themeApplyMode === 'interface') {
-      updatedPreferences.interfaceColors = theme.colors;
+      updatedPreferences.selectedInterfaceTheme = themeId;
+      updatedPreferences.interfaceTheme = themeId as any;
+      updatedPreferences.interfaceColors = interfaceThemeColors;
     }
 
     if (themeApplyMode === 'both' || themeApplyMode === 'reader') {
-      const matchingColorTheme = COLOR_THEMES.find(colorTheme => colorTheme.id === themeId);
+      const matchingColorTheme = getColorTheme(themeId, preferences.snowSubTheme || 'night');
       if (matchingColorTheme) {
+        const colorTheme = { ...matchingColorTheme };
+        if (themeId === 'custom' && preferences.customColors) {
+          colorTheme.colors = preferences.customColors;
+        }
         updatedPreferences.selectedColorTheme = themeId;
-        updatedPreferences.colors = matchingColorTheme.colors;
-        updatedPreferences.useThemeBasedColors = true;
+        updatedPreferences.theme = themeId as any;
+        updatedPreferences.colors = colorTheme.colors;
+        updatedPreferences.useThemeBasedColors = themeId !== 'custom';
       }
     }
 
     onPreferencesChange(updatedPreferences);
-  };
+  }, [preferences, onPreferencesChange, themeApplyMode, generateInterfaceColors]);
 
-  const handleCustomColorChange = (colorKey: string, value: string) => {
-    onPreferencesChange({
-      ...preferences,
-      colors: {
+  const handleCustomColorChange = useCallback((type: 'reader' | 'interface', colorKey: string, value: string) => {
+    const updatedPreferences = { ...preferences };
+    const sync = preferences.syncInterfaceWithReading ?? true;
+    
+    if (type === 'reader') {
+      updatedPreferences.colors = {
         ...preferences.colors,
         [colorKey]: value
-      },
-      selectedColorTheme: 'custom',
-      useThemeBasedColors: false
-    });
-  };
+      };
+      updatedPreferences.customColors = {
+        ...(preferences.customColors || {
+          textColor: preferences.colors.textColor,
+          backgroundColor: preferences.colors.backgroundColor
+        }),
+        [colorKey]: value
+      };
+      updatedPreferences.selectedColorTheme = 'custom';
+      updatedPreferences.theme = 'custom';
+      updatedPreferences.useThemeBasedColors = false;
 
-  const handleIconVisibilityChange = (iconKey: string, visible: boolean) => {
+      if (sync) {
+        const background = colorKey === 'backgroundColor' ? value : preferences.colors.backgroundColor;
+        const text = colorKey === 'textColor' ? value : preferences.colors.textColor;
+        
+        updatedPreferences.interfaceColors = generateInterfaceColors(background, text);
+        updatedPreferences.customInterfaceColors = {
+          panelBackground: background,
+          panelText: text
+        };
+        updatedPreferences.selectedInterfaceTheme = 'custom';
+        updatedPreferences.interfaceTheme = 'custom';
+      }
+    } else {
+      const background = colorKey === 'background' ? value : (preferences.customInterfaceColors?.panelBackground || preferences.interfaceColors.panelBackground);
+      const text = colorKey === 'text' ? value : (preferences.customInterfaceColors?.panelText || preferences.interfaceColors.panelText);
+      
+      updatedPreferences.interfaceColors = generateInterfaceColors(background, text);
+      updatedPreferences.customInterfaceColors = {
+        panelBackground: background,
+        panelText: text
+      };
+      updatedPreferences.selectedInterfaceTheme = 'custom';
+      updatedPreferences.interfaceTheme = 'custom';
+
+      if (sync) {
+        if (colorKey === 'background') {
+          updatedPreferences.colors = {
+            ...preferences.colors,
+            backgroundColor: value
+          };
+          updatedPreferences.customColors = {
+            ...(preferences.customColors || {
+              textColor: preferences.colors.textColor,
+              backgroundColor: preferences.colors.backgroundColor
+            }),
+            backgroundColor: value
+          };
+        } else if (colorKey === 'text') {
+          updatedPreferences.colors = {
+            ...preferences.colors,
+            textColor: value
+          };
+          updatedPreferences.customColors = {
+            ...(preferences.customColors || {
+              textColor: preferences.colors.textColor,
+              backgroundColor: preferences.colors.backgroundColor
+            }),
+            textColor: value
+          };
+        }
+        updatedPreferences.selectedColorTheme = 'custom';
+        updatedPreferences.theme = 'custom';
+        updatedPreferences.useThemeBasedColors = false;
+      }
+    }
+    
+    onPreferencesChange(updatedPreferences);
+  }, [preferences, onPreferencesChange, generateInterfaceColors]);
+
+  const handleIconVisibilityChange = useCallback((iconKey: string, visible: boolean) => {
     const currentIconVisibility = preferences.iconVisibility || DEFAULT_VALUES.iconVisibility;
     
     onPreferencesChange({
@@ -180,191 +406,144 @@ export const ReaderSettings: React.FC<ReaderSettingsProps> = ({
         [iconKey]: visible
       }
     });
+  }, [preferences, onPreferencesChange]);
+
+  const handleResetToDefaults = () => {
+    setResetCountdown(3);
+    setShowResetConfirm(true);
   };
 
-  const handleResetToDefaults = async () => {
+  useEffect(() => {
+    let timer: any = null;
+    if (showResetConfirm) {
+      setResetCountdown(3);
+      timer = setInterval(() => {
+        setResetCountdown(prev => {
+          if (prev <= 1) {
+            clearInterval(timer);
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+    }
+    return () => {
+      if (timer) clearInterval(timer);
+    };
+  }, [showResetConfirm]);
+
+  const confirmResetToDefaults = async () => {
+    if (resetCountdown > 0 || isResetting) return;
+    setIsResetting(true);
     try {
       await resetToDefaults();
-      setShowResetConfirm(false);
-      window.location.reload();
+      window.location.href = '/';
     } catch (error) {
       console.error('Error resetting to defaults:', error);
+      setIsResetting(false);
+      setShowResetConfirm(false);
     }
   };
 
-  // Font preview text
-  const previewText = getTranslation('fontPreviewText');
-
-  // Get font style for preview
-  const getFontStyle = (fontFamily: string) => {
-    const fontMap = {
-      'Inter': 'Inter, sans-serif',
-      'Georgia': 'Georgia, serif',
-      'JetBrains Mono': 'JetBrains Mono, monospace',
-      // Removed 'Crimson Text' and 'Source Sans Pro'
-    };
-    return fontMap[fontFamily as keyof typeof fontMap] || fontMap.Inter;
+  const handleExportData = async () => {
+    await exportUserData(true);
   };
 
-  // Theme preview component
-  const ThemePreview: React.FC<{ theme: ColorTheme | InterfaceTheme; isSelected: boolean; type: 'color' | 'interface' }> = ({ theme, isSelected, type }) => (
-    <div
-      className={`relative p-4 rounded-lg border-2 cursor-pointer transition-all duration-300 ${
-        isSelected ? 'transform scale-105 shadow-lg' : 'hover:transform hover:scale-102'
-      }`}
-      style={{
-        borderColor: isSelected ? '#007BFF' : interfaceStyles.borderColor,
-        backgroundColor: isSelected ? '#007BFF10' : 'transparent'
-      }}
-      onClick={() => type === 'color' ? handleColorThemeChange(theme.id) : handleInterfaceThemeChange(theme.id)}
-    >
-      {/* Theme Preview Panel */}
-      <div 
-        className="w-full h-16 rounded-lg mb-3 border overflow-hidden"
-        style={{ 
-          backgroundColor: type === 'color' ? (theme as ColorTheme).colors.backgroundColor : (theme as InterfaceTheme).colors.panelBackground,
-          borderColor: interfaceStyles.borderColor
-        }}
-      >
-        <div className="p-2 h-full flex flex-col justify-between">
-          <div 
-            className="text-xs font-medium"
-            style={{ 
-              color: type === 'color' ? (theme as ColorTheme).colors.chapterTitleColor : (theme as InterfaceTheme).colors.textPrimary
-            }}
-          >
-            {getTranslation('sampleTitle')}
-          </div>
-          <div 
-            className="text-xs"
-            style={{ 
-              color: type === 'color' ? (theme as ColorTheme).colors.textColor : (theme as InterfaceTheme).colors.textSecondary
-            }}
-          >
-            {getTranslation('sampleTextContent')}
-          </div>
-        </div>
-      </div>
+  const cancelResetToDefaults = () => {
+    if (isResetting) return;
+    setShowResetConfirm(false);
+  };
 
-      <div className="flex items-center justify-between mb-2">
-        <h4 className="font-medium text-sm" style={{ color: interfaceStyles.color }}>
-          {getTranslation(theme.id)}
-          {theme.id === 'light' && <span className="text-xs px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 ml-1">{getTranslation('default')}</span>}
-        </h4>
-        {isSelected && (
-          <div 
-            className="w-4 h-4 rounded-full"
-            style={{ backgroundColor: '#007BFF' }}
-          />
-        )}
-      </div>
-      
-      <p className="text-xs mb-3" style={{ color: interfaceStyles.color, opacity: 0.7 }}>
-        {getTranslation(`${theme.id}Description`)}
-      </p>
+  const glassEnabled = (preferences.glassEnabled ?? false) && !(preferences.glassReaderAreaOnly ?? false);
+  const activeEffect = preferences.selectedInterfaceTheme || preferences.selectedColorTheme || preferences.theme || 'light';
+  const isEffectsActive = activeEffect === 'snow' || activeEffect === 'rain' || activeEffect === 'aurora';
 
-      {/* Color Swatches */}
-      <div className="flex gap-1">
-        {type === 'color' ? (
-          <>
-            <div 
-              className="w-4 h-4 rounded border"
-              style={{ 
-                backgroundColor: (theme as ColorTheme).colors.backgroundColor,
-                borderColor: interfaceStyles.borderColor
-              }}
-              title="Background"
-            />
-            <div 
-              className="w-4 h-4 rounded border"
-              style={{ 
-                backgroundColor: (theme as ColorTheme).colors.textColor,
-                borderColor: interfaceStyles.borderColor
-              }}
-              title="Text"
-            />
-            <div 
-              className="w-4 h-4 rounded border"
-              style={{ 
-                backgroundColor: (theme as ColorTheme).colors.chapterTitleColor,
-                borderColor: interfaceStyles.borderColor
-              }}
-              title="Title"
-            />
-          </>
-        ) : (
-          <>
-            <div 
-              className="w-4 h-4 rounded border"
-              style={{ 
-                backgroundColor: (theme as InterfaceTheme).colors.headerBackground,
-                borderColor: interfaceStyles.borderColor
-              }}
-              title="Header"
-            />
-            <div 
-              className="w-4 h-4 rounded border"
-              style={{ 
-                backgroundColor: (theme as InterfaceTheme).colors.panelBackground,
-                borderColor: interfaceStyles.borderColor
-              }}
-              title="Panel"
-            />
-            <div 
-              className="w-4 h-4 rounded border"
-              style={{ 
-                backgroundColor: (theme as InterfaceTheme).colors.accent,
-                borderColor: interfaceStyles.borderColor
-              }}
-              title="Accent"
-            />
-          </>
-        )}
-      </div>
-    </div>
-  );
+  const isDarkTheme = preferences.selectedInterfaceTheme === 'dark' || 
+                      preferences.selectedInterfaceTheme === 'ocean' || 
+                      (preferences.selectedInterfaceTheme === 'aurora' && preferences.snowSubTheme !== 'day') || 
+                      preferences.selectedInterfaceTheme === 'highcontrast' || 
+                      preferences.snowSubTheme === 'night' || 
+                      preferences.snowSubTheme === 'midnight';
 
-  // Default indicator component
-  const DefaultIndicator: React.FC<{ isDefault: boolean }> = ({ isDefault }) => (
-    isDefault ? (
-      <span className="text-xs px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 ml-2">{getTranslation('default')}</span>
-    ) : null
-  );
+  const overlayBg = (() => {
+    const bg = interfaceStyles.backgroundColor || '#ffffff';
+    let r = 255, g = 255, b = 255;
+    if (bg.startsWith('#')) {
+      const hex = bg.substring(1);
+      if (hex.length === 6) {
+        r = parseInt(hex.substring(0, 2), 16);
+        g = parseInt(hex.substring(2, 4), 16);
+        b = parseInt(hex.substring(4, 6), 16);
+      } else if (hex.length === 3) {
+        r = parseInt(hex.substring(0, 1) + hex.substring(0, 1), 16);
+        g = parseInt(hex.substring(1, 2) + hex.substring(1, 2), 16);
+        b = parseInt(hex.substring(2, 3) + hex.substring(2, 3), 16);
+      }
+    }
+    const opacity = glassEnabled && !isEffectsActive ? 0.15 : (isDarkTheme ? 0.65 : 0.45);
+    return `rgba(${r}, ${g}, ${b}, ${opacity})`;
+  })();
+
+  const backdropFilterVal = glassEnabled && !isEffectsActive ? 'blur(var(--interface-glass-blur, 14px))' : 'none';
+
+  // Render tab contents dynamically directly in the component body to avoid selection lag/stale closure bugs.
 
   return createPortal(
-    <div className="fixed inset-0 bg-black/50 z-[100] flex justify-end animate-fade-in backdrop-blur-sm">
+    <div className="fixed inset-0 z-[100] flex justify-end">
+      {/* Backdrop overlay background with filter */}
+      <div 
+        className="absolute inset-0 animate-fade-in"
+        style={{
+          backgroundColor: overlayBg,
+          backdropFilter: backdropFilterVal,
+          WebkitBackdropFilter: backdropFilterVal,
+        }}
+      />
+      
+      {/* Settings Panel */}
       <div 
         ref={panelRef}
-        className="w-full max-w-lg h-full shadow-xl overflow-hidden animate-slide-in-right flex flex-col"
+        className="settings-panel relative w-full max-w-lg h-full shadow-xl overflow-hidden animate-slide-in-right flex flex-col z-10"
         style={{
-          backgroundColor: interfaceStyles.backgroundColor,
+          backgroundColor: glassEnabled ? 'var(--interface-glass-bg, rgba(255, 255, 255, 0.45))' : interfaceStyles.backgroundColor,
           fontFamily: preferences?.applyFontGlobally ? 
-            (preferences.fontFamily === 'Inter' ? 'Inter, sans-serif' : 
-             preferences.fontFamily === 'JetBrains Mono' ? 'JetBrains Mono, monospace' :
-             'Georgia, serif') : undefined // Removed Crimson Text and Source Sans Pro
+            (preferences.fontFamily === 'Arial' ? 'Arial, Helvetica, sans-serif' :
+             preferences.fontFamily === 'Inter' ? 'Inter, sans-serif' : 
+             'Georgia, serif') : undefined
         }}
         data-settings-panel
       >
+        <InterfaceEffectsOverlay preferences={preferences} target="interface" />
+        {preferences.selectedInterfaceTheme === 'light' && (
+          <style>{`
+            [data-settings-panel] .rounded-lg.border,
+            [data-settings-panel] .rounded-xl.border {
+              border-style: dashed !important;
+              border-width: 1px !important;
+              box-shadow: 0 1px 2px rgba(0,0,0,0.02) !important;
+            }
+          `}</style>
+        )}
         {/* Header */}
         <div 
-          className="flex items-center justify-between p-4 border-b flex-shrink-0"
+          className="flex items-center justify-between p-4 border-b flex-shrink-0 gap-2 min-w-0"
           style={{ 
-            backgroundColor: interfaceStyles.backgroundColor,
+            backgroundColor: glassEnabled ? 'transparent' : interfaceStyles.backgroundColor,
             borderColor: interfaceStyles.borderColor 
           }}
         >
-          <div className="flex items-center gap-3">
-            <Monitor className="w-6 h-6" style={{ color: '#007BFF' }} />
-            <h2 className="text-lg font-semibold" style={{ color: interfaceStyles.color }}>
+          <div className="flex items-center gap-2.5 min-w-0 flex-1">
+            <Monitor className="w-5 h-5 shrink-0" style={{ color: '#007BFF' }} />
+            <h2 className="text-base sm:text-lg font-semibold truncate" style={{ color: interfaceStyles.color }} title={getTranslation('readerSettings')}>
               {getTranslation('readerSettings')}
             </h2>
           </div>
           
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5 shrink-0">
             {/* Reset to Defaults */}
             <button
               onClick={() => setShowResetConfirm(true)}
-              className="p-2 hover:bg-gray-100 hover:bg-opacity-20 rounded-lg transition-all duration-300"
+              className="p-2 hover:bg-gray-100 hover:bg-opacity-20 rounded-lg transition-all duration-300 cursor-pointer shrink-0"
               style={{ color: '#ef4444' }}
               aria-label={getTranslation('resetToDefaults')}
               title={getTranslation('resetToDefaults')}
@@ -373,36 +552,30 @@ export const ReaderSettings: React.FC<ReaderSettingsProps> = ({
             </button>
 
             {/* Language Selector */}
-            <div className="relative">
-              <button
-                onClick={() => setShowLanguageSelector(!showLanguageSelector)}
-                className="p-2 hover:bg-gray-100 hover:bg-opacity-20 rounded-lg transition-all duration-300"
-                style={{ color: interfaceStyles.color }}
-                aria-label={getTranslation('language')}
-              >
-                <Globe className="w-5 h-5" />
-              </button>
-              
-              {showLanguageSelector && (
-                <div className="absolute top-full right-0 mt-2 z-50">
-                  <div 
-                    className="rounded-lg shadow-xl border-2 py-2 min-w-48 animate-fade-in"
-                    style={{
-                      backgroundColor: interfaceStyles.backgroundColor,
-                      borderColor: interfaceStyles.borderColor,
-                      boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.3), 0 10px 10px -5px rgba(0, 0, 0, 0.2)'
-                    }}
-                  >
-                    <LanguageSelector onClose={() => setShowLanguageSelector(false)} />
+            {!pdfMode && (
+              <div className="relative shrink-0">
+                <button
+                  onClick={() => setShowLanguageSelector(!showLanguageSelector)}
+                  className="p-2 hover:bg-gray-100 hover:bg-opacity-20 rounded-lg transition-all duration-300 cursor-pointer shrink-0"
+                  style={{ color: interfaceStyles.color }}
+                  aria-label={getTranslation('language')}
+                  data-language-toggle
+                >
+                  <Globe className="w-5 h-5" />
+                </button>
+                
+                {showLanguageSelector && (
+                  <div className="absolute top-full right-0 mt-2 z-50 animate-fade-in">
+                    <LanguageSelector preferences={preferences} onClose={() => setShowLanguageSelector(false)} />
                   </div>
-                </div>
-              )}
-            </div>
+                )}
+              </div>
+            )}
 
             {/* Close Button */}
             <button
               onClick={onClose}
-              className="p-2 hover:bg-gray-100 hover:bg-opacity-20 rounded-lg transition-all duration-300"
+              className="p-2 hover:bg-gray-100 hover:bg-opacity-20 rounded-lg transition-all duration-300 cursor-pointer shrink-0"
               style={{ color: interfaceStyles.color }}
               aria-label="Close settings"
             >
@@ -412,39 +585,41 @@ export const ReaderSettings: React.FC<ReaderSettingsProps> = ({
         </div>
 
         {/* Tab Navigation */}
-        <div 
-          className="flex border-b"
-          style={{ borderColor: interfaceStyles.borderColor }}
-        >
-          {[
-            { id: 'appearance', label: getTranslation('appearance'), icon: Palette },
-            { id: 'behavior', label: getTranslation('behavior'), icon: Eye },
-            { id: 'advanced', label: getTranslation('advanced'), icon: SettingsIcon }
-          ].map((tab) => {
-            const Icon = tab.icon;
-            return (
-              <button
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id as 'appearance' | 'behavior' | 'advanced')}
-                className={`flex-1 flex items-center justify-center gap-2 py-3 px-4 text-sm font-medium transition-all duration-300 ${
-                  activeTab === tab.id
-                    ? 'border-b-2 border-blue-500 text-blue-600'
-                    : 'hover:bg-gray-100 hover:bg-opacity-20'
-                }`}
-                style={{
-                  color: activeTab === tab.id ? '#007BFF' : interfaceStyles.color,
-                  backgroundColor: activeTab === tab.id ? '#007BFF10' : 'transparent'
-                }}
-              >
-                <Icon className="w-4 h-4" />
-                {tab.label}
-              </button>
-            );
-          })}
-        </div>
+        {!pdfMode && (
+          <div 
+            className="flex border-b"
+            style={{ borderColor: interfaceStyles.borderColor }}
+          >
+            {[
+              { id: 'appearance', label: getTranslation('appearance'), icon: Monitor },
+              { id: 'behavior', label: getTranslation('behavior'), icon: Eye },
+              { id: 'advanced', label: getTranslation('advanced'), icon: SettingsIcon }
+            ].map((tab) => {
+              const Icon = tab.icon;
+              return (
+                <button
+                  key={tab.id}
+                  onClick={() => setActiveTab(tab.id as 'appearance' | 'behavior' | 'advanced')}
+                  className={`flex-1 flex items-center justify-center gap-2 py-3 px-4 text-sm font-medium transition-all duration-300 cursor-pointer ${
+                    activeTab === tab.id
+                      ? 'border-b-2 border-blue-500 text-blue-600'
+                      : 'hover:bg-gray-100 hover:bg-opacity-20'
+                  }`}
+                  style={{
+                    color: activeTab === tab.id ? '#007BFF' : interfaceStyles.color,
+                    backgroundColor: activeTab === tab.id ? '#007BFF10' : 'transparent'
+                  }}
+                >
+                  <Icon className="w-4 h-4" />
+                  {tab.label}
+                </button>
+              );
+            })}
+          </div>
+        )}
 
         {/* Settings Content */}
-        <div className="flex-1 overflow-y-auto relative">
+        <div id="reader-settings-scroll-container" className="flex-1 overflow-y-auto relative">
           {/* PDF Mode Overlay */}
           {pdfMode && (
             <div 
@@ -498,448 +673,134 @@ export const ReaderSettings: React.FC<ReaderSettingsProps> = ({
 
             {/* Appearance Tab */}
             {activeTab === 'appearance' && (
-              <>
-                {/* Responsive Grid Layout */}
-                <div className="grid grid-cols-1 gap-4">
-                  {/* Font Size Slider */}
-                  <div className="p-4 rounded-lg border" style={{ borderColor: interfaceStyles.borderColor }}>
-                    <div className="flex items-center justify-between mb-2">
-                      <label className="text-base font-medium flex items-center" style={{ color: interfaceStyles.color }}>
-                        {getTranslation('fontSize')}
-                        <DefaultIndicator isDefault={isDefault('fontSize', preferences.fontSize)} />
-                      </label>
-                      <span className="text-sm font-mono px-2 py-1 rounded" style={{ 
-                        color: interfaceStyles.color, 
-                        backgroundColor: interfaceStyles.borderColor + '40'
-                      }}>
-                        {preferences.fontSize}px
-                      </span>
-                    </div>
-                    <input
-                      type="range"
-                      min="12"
-                      max="64"
-                      step="2"
-                      value={preferences.fontSize}
-                      onChange={(e) => handleSliderChange('fontSize', parseInt(e.target.value))}
-                      className="slider w-full h-2 rounded-lg appearance-none cursor-pointer"
-                      style={{
-                        background: `linear-gradient(to right, #007BFF 0%, #007BFF ${((preferences.fontSize - 12) / (64 - 12)) * 100}%, #e5e7eb ${((preferences.fontSize - 12) / (64 - 12)) * 100}%, #e5e7eb 100%)`
-                      }}
-                    />
-                    <div className="flex justify-between text-xs mt-1" style={{ color: interfaceStyles.color, opacity: 0.6 }}>
-                      <span>12px</span>
-                      <span>64px</span>
-                    </div>
-                  </div>
-
-                  {/* Font Family */}
-                  <div className="p-4 rounded-lg border" style={{ borderColor: interfaceStyles.borderColor }}>
-                    <label className="block text-base font-medium mb-3 flex items-center" style={{ color: interfaceStyles.color }}>
-                      {getTranslation('fontFamily')}
-                      <DefaultIndicator isDefault={isDefault('fontFamily', preferences.fontFamily)} />
-                    </label>
-                    
-                    <div className="space-y-3">
-                      {['Inter', 'Georgia', 'JetBrains Mono'].map((font) => (
-                        <div
-                          key={font}
-                          className={`p-3 rounded-lg border-2 cursor-pointer transition-all duration-300 ${
-                            preferences.fontFamily === font ? 'transform scale-105' : 'hover:transform hover:scale-102'
-                          }`}
-                          style={{
-                            borderColor: preferences.fontFamily === font ? '#007BFF' : interfaceStyles.borderColor,
-                            backgroundColor: preferences.fontFamily === font ? '#007BFF10' : 'transparent'
-                          }}
-                          onClick={() => onPreferencesChange({ ...preferences, fontFamily: font as 'Inter' | 'Georgia' | 'JetBrains Mono' })}
-                        >
-                          <div className="flex items-center justify-between mb-2">
-                            <span className="font-medium text-sm" style={{ color: interfaceStyles.color }}>
-                              {font}
-                              {font === 'Inter' && <span className="text-xs px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 ml-1">{getTranslation('default')}</span>}
-                            </span>
-                            {preferences.fontFamily === font && (
-                              <div 
-                                className="w-4 h-4 rounded-full"
-                                style={{ backgroundColor: '#007BFF' }}
-                              />
-                            )}
-                          </div>
-                          <div 
-                            className="text-sm leading-relaxed"
-                            style={{ 
-                              fontFamily: getFontStyle(font),
-                              color: interfaceStyles.color,
-                              opacity: 0.8
-                            }}
-                          >
-                            {previewText}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Line Height Slider */}
-                  <div className="p-4 rounded-lg border" style={{ borderColor: interfaceStyles.borderColor }}>
-                    <div className="flex items-center justify-between mb-2">
-                      <label className="text-base font-medium flex items-center" style={{ color: interfaceStyles.color }}>
-                        {getTranslation('lineHeight')}
-                        <DefaultIndicator isDefault={isDefault('lineHeight', preferences.lineHeight)} />
-                      </label>
-                      <span className="text-sm font-mono px-2 py-1 rounded" style={{ 
-                        color: interfaceStyles.color, 
-                        backgroundColor: interfaceStyles.borderColor + '40'
-                      }}>
-                        {preferences.lineHeight}
-                      </span>
-                    </div>
-                    <input
-                      type="range"
-                      min="1.2"
-                      max="2.5"
-                      step="0.1"
-                      value={preferences.lineHeight}
-                      onChange={(e) => handleSliderChange('lineHeight', parseFloat(e.target.value))}
-                      className="slider w-full h-2 rounded-lg appearance-none cursor-pointer"
-                      style={{
-                        background: `linear-gradient(to right, #007BFF 0%, #007BFF ${((preferences.lineHeight - 1.2) / (2.5 - 1.2)) * 100}%, #e5e7eb ${((preferences.lineHeight - 1.2) / (2.5 - 1.2)) * 100}%, #e5e7eb 100%)`
-                      }}
-                    />
-                    <div className="flex justify-between text-xs mt-1" style={{ color: interfaceStyles.color, opacity: 0.6 }}>
-                      <span>1.2</span>
-                      <span>2.5</span>
-                    </div>
-                  </div>
-
-                  {/* Letter Spacing Slider */}
-                  <div className="p-4 rounded-lg border" style={{ borderColor: interfaceStyles.borderColor }}>
-                    <div className="flex items-center justify-between mb-2">
-                      <label className="text-base font-medium flex items-center" style={{ color: interfaceStyles.color }}>
-                        {getTranslation('letterSpacing')}
-                        <DefaultIndicator isDefault={isDefault('marginSize', preferences.marginSize)} />
-                      </label>
-                      <span className="text-sm font-mono px-2 py-1 rounded" style={{ 
-                        color: interfaceStyles.color, 
-                        backgroundColor: interfaceStyles.borderColor + '40'
-                      }}>
-                        {preferences.marginSize}em
-                      </span>
-                    </div>
-                    <input
-                      type="range"
-                      min="0"
-                      max="2"
-                      step="0.1"
-                      value={preferences.marginSize}
-                      onChange={(e) => handleSliderChange('marginSize', parseFloat(e.target.value))}
-                      className="slider w-full h-2 rounded-lg appearance-none cursor-pointer"
-                      style={{
-                        background: `linear-gradient(to right, #007BFF 0%, #007BFF ${(preferences.marginSize / 2) * 100}%, #e5e7eb ${(preferences.marginSize / 2) * 100}%, #e5e7eb 100%)`
-                      }}
-                    />
-                    <div className="flex justify-between text-xs mt-1" style={{ color: interfaceStyles.color, opacity: 0.6 }}>
-                      <span>0em</span>
-                      <span>2em</span>
-                    </div>
-                  </div>
-
-                  {/* Max Width */}
-                  <div className="p-4 rounded-lg border" style={{ borderColor: interfaceStyles.borderColor }}>
-                    <label className="block text-base font-medium mb-3 flex items-center" style={{ color: interfaceStyles.color }}>
-                      {getTranslation('maxWidth')}
-                      <DefaultIndicator isDefault={isDefault('maxWidth', preferences.maxWidth)} />
-                    </label>
-                    <div className="grid grid-cols-2 gap-2">
-                      {/* Removed 'phone' option */}
-                      {['normal', 'full'].map((width) => (
-                        <button
-                          key={width}
-                          onClick={() => onPreferencesChange({ ...preferences, maxWidth: width as 'normal' | 'full' })}
-                          className={`p-3 rounded-lg border-2 transition-all duration-300 text-sm font-medium ${
-                            preferences.maxWidth === width
-                              ? 'transform scale-105'
-                              : 'hover:transform hover:scale-102'
-                          }`}
-                          style={{
-                            borderColor: preferences.maxWidth === width ? '#007BFF' : interfaceStyles.borderColor,
-                            backgroundColor: preferences.maxWidth === width ? '#007BFF10' : 'transparent',
-                            color: interfaceStyles.color
-                          }}
-                        >
-                          {getTranslation(width)}
-                          {width === 'full' && <span className="text-xs px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 block">{getTranslation('default')}</span>}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-
-                {/* Themes Section */}
-                <div>
-                  <div className="flex items-center gap-2 mb-4">
-                    <Palette className="w-5 h-5" style={{ color: '#007BFF' }} />
-                    <h3 className="text-lg font-semibold" style={{ color: interfaceStyles.color }}>
-                      {getTranslation('colorTheme')}
-                    </h3>
-                  </div>
-
-                  {/* Theme Apply Mode Selector */}
-                  <div className="mb-4 p-4 rounded-lg border" style={{ borderColor: interfaceStyles.borderColor }}>
-                    <label className="block text-base font-medium mb-3 flex items-center" style={{ color: interfaceStyles.color }}>
-                      {getTranslation('applyThemeTo')}
-                      <DefaultIndicator isDefault={isDefault('themeApplyMode', themeApplyMode)} />
-                    </label>
-                    <div className="grid grid-cols-3 gap-2">
-                      {[
-                        { id: 'both', label: getTranslation('interfaceAndReader'), icon: Layers },
-                        { id: 'interface', label: getTranslation('interfaceOnly'), icon: Monitor },
-                        { id: 'reader', label: getTranslation('readerOnly'), icon: BookOpen }
-                      ].map(({ id, label, icon: Icon }) => (
-                        <button
-                          key={id}
-                          onClick={() => setThemeApplyMode(id as 'both' | 'interface' | 'reader')}
-                          className={`p-3 rounded-lg border-2 transition-all duration-300 text-xs font-medium flex flex-col items-center gap-1 ${
-                            themeApplyMode === id ? 'transform scale-105' : 'hover:transform hover:scale-102'
-                          }`}
-                          style={{
-                            borderColor: themeApplyMode === id ? '#007BFF' : interfaceStyles.borderColor,
-                            backgroundColor: themeApplyMode === id ? '#007BFF10' : 'transparent',
-                            color: interfaceStyles.color
-                          }}
-                        >
-                          <Icon className="w-4 h-4" />
-                          {id === 'both' && <span className="text-xs px-2 py-0.5 rounded-full bg-blue-100 text-blue-800">{getTranslation('default')}</span>}
-                          {label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Color Themes Grid */}
-                  <div className="grid grid-cols-2 gap-3 mb-4">
-                    {COLOR_THEMES.slice(0, 8).map((theme) => (
-                      <ThemePreview
-                        key={theme.id}
-                        theme={theme}
-                        isSelected={preferences.selectedColorTheme === theme.id}
-                        type="color"
-                      />
-                    ))}
-                  </div>
-
-                  {/* Custom Colors */}
-                  {preferences.selectedColorTheme === 'custom' && (
-                    <div className="mt-4 p-4 rounded-lg border" style={{ borderColor: interfaceStyles.borderColor }}>
-                      <h4 className="font-medium mb-3" style={{ color: interfaceStyles.color }}>
-                        {getTranslation('customColors')}
-                      </h4>
-                      <div className="grid grid-cols-1 gap-3">
-                        <div className="flex items-center gap-3">
-                          <label className="text-sm font-medium min-w-0 flex-1" style={{ color: interfaceStyles.color }}>
-                            {getTranslation('backgroundColor')}
-                          </label>
-                          <input
-                            type="color"
-                            value={preferences.colors.backgroundColor}
-                            onChange={(e) => handleCustomColorChange('backgroundColor', e.target.value)}
-                            className="w-12 h-8 rounded border cursor-pointer"
-                            style={{ borderColor: interfaceStyles.borderColor }}
-                          />
-                        </div>
-                        <div className="flex items-center gap-3">
-                          <label className="text-sm font-medium min-w-0 flex-1" style={{ color: interfaceStyles.color }}>
-                            {getTranslation('textColor')}
-                          </label>
-                          <input
-                            type="color"
-                            value={preferences.colors.textColor}
-                            onChange={(e) => handleCustomColorChange('textColor', e.target.value)}
-                            className="w-12 h-8 rounded border cursor-pointer"
-                            style={{ borderColor: interfaceStyles.borderColor }}
-                          />
-                        </div>
-                        <div className="flex items-center gap-3">
-                          <label className="text-sm font-medium min-w-0 flex-1" style={{ color: interfaceStyles.color }}>
-                            {getTranslation('chapterTitleColor')}
-                          </label>
-                          <input
-                            type="color"
-                            value={preferences.colors.chapterTitleColor}
-                            onChange={(e) => handleCustomColorChange('chapterTitleColor', e.target.value)}
-                            className="w-12 h-8 rounded border cursor-pointer"
-                            style={{ borderColor: interfaceStyles.borderColor }}
-                          />
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </>
+              <SettingsAppearanceTab
+                preferences={preferences}
+                onPreferencesChange={onPreferencesChange}
+                interfaceStyles={interfaceStyles}
+                isDefault={isDefault}
+                handleSliderChange={handleSliderChange}
+                handleColorThemeChange={handleColorThemeChange}
+                handleInterfaceThemeChange={handleInterfaceThemeChange}
+                handleCustomColorChange={handleCustomColorChange}
+                isFontFamilyExpanded={isFontFamilyExpanded}
+                setIsFontFamilyExpanded={setIsFontFamilyExpanded}
+                isColorThemeExpanded={isColorThemeExpanded}
+                setIsColorThemeExpanded={setIsColorThemeExpanded}
+                themeApplyMode={themeApplyMode}
+                setThemeApplyMode={setThemeApplyMode}
+                activeThemeTab={activeThemeTab}
+                setActiveThemeTab={setActiveThemeTab}
+              />
             )}
-
+ 
             {/* Behavior Tab */}
             {activeTab === 'behavior' && (
-              <div className="space-y-4">
-                {/* Corner Navigation */}
-                <div className="p-4 rounded-lg border" style={{ borderColor: interfaceStyles.borderColor }}>
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="font-medium flex items-center" style={{ color: interfaceStyles.color }}>
-                      {getTranslation('cornerNavigationVisible')}
-                      <DefaultIndicator isDefault={isDefault('cornerNavigation', preferences.cornerNavigation)} />
-                    </span>
-                    <label className="relative inline-flex items-center cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={preferences.cornerNavigation.visible}
-                        onChange={(e) => onPreferencesChange({
-                          ...preferences,
-                          cornerNavigation: { ...preferences.cornerNavigation, visible: e.target.checked }
-                        })}
-                        className="sr-only peer"
-                      />
-                      <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
-                    </label>
-                  </div>
-                  <p className="text-sm" style={{ color: interfaceStyles.color, opacity: 0.7 }}>
-                    {getTranslation('cornerNavigationDescription')}
-                  </p>
-                </div>
-              </div>
+              <SettingsBehaviorTab
+                preferences={preferences}
+                onPreferencesChange={onPreferencesChange}
+                interfaceStyles={interfaceStyles}
+                isDefault={isDefault}
+              />
             )}
-
+ 
             {/* Advanced Tab */}
             {activeTab === 'advanced' && (
-              <div className="space-y-4">
-                {/* Text-to-Speech */}
-                <div className="p-4 rounded-lg border" style={{ borderColor: interfaceStyles.borderColor }}>
-                  <div className="flex items-center gap-2 mb-4">
-                    <Volume2 className="w-5 h-5" style={{ color: '#955fffff' }} />
-                    <h3 className="text-lg font-semibold flex items-center gap-2" style={{ color: interfaceStyles.color }}>
-                      {getTranslation('textToSpeech')}
-                      <span className="text-xs font-normal px-2 py-1 rounded-full bg-yellow-100 text-yellow-800">
-                        {getTranslation('experimental')}
-                      </span>
-                    </h3>
-                  </div>
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="font-medium flex items-center" style={{ color: interfaceStyles.color }}>
-                      {getTranslation('enableTextToSpeech')}
-                      <DefaultIndicator isDefault={isDefault('enableTextToSpeech', preferences.enableTextToSpeech)} />
-                    </span>
-                    <label className="relative inline-flex items-center cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={preferences.enableTextToSpeech}
-                        onChange={(e) => onPreferencesChange({ ...preferences, enableTextToSpeech: e.target.checked })}
-                        className="sr-only peer"
-                      />
-                      <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
-                    </label>
-                  </div>
-                  <p className="text-sm" style={{ color: interfaceStyles.color, opacity: 0.7 }}>
-                    {getTranslation('enableTextToSpeechDescription')}
-                  </p>
-                </div>
-
-                {/* Icon Visibility Controls */}
-                <div className="p-4 rounded-lg border" style={{ borderColor: interfaceStyles.borderColor }}>
-                  <div className="flex items-center gap-2 mb-4">
-                    <EyeOff className="w-5 h-5" style={{ color: '#007BFF' }} />
-                    <h3 className="text-lg font-semibold" style={{ color: interfaceStyles.color }}>
-                      {getTranslation('iconVisibility')}
-                    </h3>
-                  </div>
-                  
-                  <p className="text-sm mb-4" style={{ color: interfaceStyles.color, opacity: 0.7 }}>
-                    {getTranslation('iconVisibilityDescription')}
-                  </p>
-
-                  <div className="space-y-3">
-                    {[
-                      { key: 'showSearchIcon', label: getTranslation('showSearchIcon') },
-                      { key: 'showBookmarkIcon', label: getTranslation('showBookmarkIcon') },
-                      { key: 'showFavoriteIcon', label: getTranslation('showFavoriteIcon') },
-                      { key: 'showShareIcon', label: getTranslation('showShareIcon') },
-                      { key: 'showFullscreenIcon', label: getTranslation('showFullscreenIcon') },
-                      { key: 'showShortcutsIcon', label: getTranslation('showShortcutsIcon') }
-                    ].map(({ key, label }) => {
-                      const currentIconVisibility = preferences.iconVisibility || DEFAULT_VALUES.iconVisibility;
-                      const isVisible = currentIconVisibility[key as keyof typeof currentIconVisibility];
-                      const isDefaultForIcon = DEFAULT_VALUES.iconVisibility[key as keyof typeof DEFAULT_VALUES.iconVisibility] === isVisible;
-                      
-                      return (
-                        <div key={key} className="flex items-center justify-between">
-                          <span className="font-medium flex items-center" style={{ color: interfaceStyles.color }}>
-                            {label}
-                            <DefaultIndicator isDefault={isDefaultForIcon} />
-                          </span>
-                          <label className="relative inline-flex items-center cursor-pointer">
-                            <input
-                              type="checkbox"
-                              checked={isVisible}
-                              onChange={(e) => handleIconVisibilityChange(key, e.target.checked)}
-                              className="sr-only peer"
-                            />
-                            <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
-                          </label>
-                        </div>
-                      );
-                    })}
-                  </div>
-
-                  {/* Settings Icon Notice */}
-                  <div 
-                    className="mt-4 p-3 rounded-lg border-l-4"
-                    style={{ 
-                      backgroundColor: '#fef3c7',
-                      borderColor: '#f59e0b'
-                    }}
-                  >
-                    <p className="text-sm text-yellow-800">
-                      <strong>{getTranslation('note')}:</strong> {getTranslation('settingsIconAlwaysVisible')}
-                    </p>
-                  </div>
-                </div>
-              </div>
+              <SettingsAdvancedTab
+                preferences={preferences}
+                onPreferencesChange={onPreferencesChange}
+                interfaceStyles={interfaceStyles}
+                isDefault={isDefault}
+                DEFAULT_VALUES={DEFAULT_VALUES}
+                handleIconVisibilityChange={handleIconVisibilityChange}
+                handleExportData={handleExportData}
+                setShowImportModal={setShowImportModal}
+              />
             )}
           </div>
         </div>
 
         {/* Reset Confirmation Modal */}
         {showResetConfirm && (
-          <div className="fixed inset-0 bg-black/50 z-[110] flex items-center justify-center animate-fade-in backdrop-blur-sm">
+          <div 
+            className="fixed inset-0 z-[110] flex items-center justify-center p-4 animate-fade-in"
+            style={{
+              backgroundColor: glassEnabled ? overlayBg : 'rgba(0,0,0,0.5)',
+              backdropFilter: backdropFilterVal !== 'none' ? backdropFilterVal : 'blur(4px)',
+              WebkitBackdropFilter: backdropFilterVal !== 'none' ? backdropFilterVal : 'blur(4px)',
+            }}
+            data-reset-modal
+          >
             <div 
-              className="rounded-lg p-6 max-w-sm w-full mx-4 animate-scale-in"
+              className="rounded-2xl p-6 max-w-md w-full mx-4 animate-scale-in border shadow-2xl"
               style={{
-                backgroundColor: interfaceStyles.backgroundColor,
-                color: interfaceStyles.color
+                backgroundColor: glassEnabled ? 'var(--interface-glass-bg, rgba(255, 255, 255, 0.45))' : interfaceStyles.backgroundColor,
+                color: interfaceStyles.color,
+                borderColor: interfaceStyles.borderColor,
+                backdropFilter: glassEnabled ? 'blur(10px)' : undefined,
+                WebkitBackdropFilter: glassEnabled ? 'blur(10px)' : undefined,
               }}
             >
-              <h3 className="text-lg font-semibold mb-4">{getTranslation('resetToDefaults')}</h3>
-              <p className="text-sm mb-6" style={{ opacity: 0.7 }}>
-                {getTranslation('resetConfirm')}
-              </p>
-              <div className="flex gap-2">
+              <h3 className="text-xl font-black mb-3 flex items-center gap-2">
+                <RotateCcw className="w-5 h-5 text-red-500" />
+                {getLocalTranslation('confirmResetButton')}
+              </h3>
+
+              {/* Warning Notice */}
+              <div className="p-3.5 mb-4 rounded-xl border bg-amber-500/10 border-amber-500/30 text-amber-900 dark:text-amber-200 text-xs leading-relaxed font-semibold">
+                <p>{getLocalTranslation('resetNotice')}</p>
+              </div>
+
+              {/* Export Button */}
+              <button
+                type="button"
+                onClick={handleExportData}
+                className="w-full mb-5 py-2.5 px-4 rounded-xl font-bold text-xs flex items-center justify-center gap-2 border transition-all hover:opacity-90 active:scale-[0.99] cursor-pointer shadow-xs"
+                style={{ 
+                  backgroundColor: `${interfaceStyles.accent || '#3b82f6'}15`, 
+                  color: interfaceStyles.accent || '#3b82f6', 
+                  borderColor: `${interfaceStyles.accent || '#3b82f6'}40` 
+                }}
+                title={getLocalTranslation('exportCurrentData')}
+              >
+                <Download className="w-4 h-4" />
+                <span>{getLocalTranslation('exportCurrentData')}</span>
+              </button>
+
+              <div className="flex justify-end gap-3 pt-2 border-t" style={{ borderColor: interfaceStyles.borderColor }}>
                 <button
-                  onClick={handleResetToDefaults}
-                  className="flex-1 py-2 px-4 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-all duration-300"
-                >
-                  {getTranslation('resetToDefaults')}
-                </button>
-                <button
-                  onClick={() => setShowResetConfirm(false)}
-                  className="px-4 py-2 border rounded-lg hover:bg-gray-50 hover:bg-opacity-20 transition-all duration-300"
-                  style={{ 
-                    borderColor: interfaceStyles.borderColor,
-                    color: interfaceStyles.color
-                  }}
+                  type="button"
+                  onClick={cancelResetToDefaults}
+                  disabled={isResetting}
+                  className="px-4 py-2 rounded-xl text-xs font-semibold transition-colors hover:bg-black/5 dark:hover:bg-white/10 cursor-pointer disabled:opacity-50"
+                  style={{ color: interfaceStyles.color }}
                 >
                   {getTranslation('cancel')}
+                </button>
+                <button
+                  type="button"
+                  onClick={confirmResetToDefaults}
+                  disabled={resetCountdown > 0 || isResetting}
+                  className="px-4 py-2 rounded-xl text-xs font-black bg-red-600 text-white hover:bg-red-700 transition-all shadow-md active:scale-95 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed disabled:transform-none flex items-center gap-1.5"
+                >
+                  {isResetting ? (
+                    <span>...</span>
+                  ) : resetCountdown > 0 ? (
+                    <span>{getLocalTranslation('resetCooldown').replace('{seconds}', String(resetCountdown))}</span>
+                  ) : (
+                    <span>{getLocalTranslation('confirmResetButton')}</span>
+                  )}
                 </button>
               </div>
             </div>
           </div>
+        )}
+
+        {/* Import Modal */}
+        {showImportModal && (
+          <ImportDataModal 
+            onClose={() => setShowImportModal(false)} 
+            preferences={preferences}
+          />
         )}
       </div>
     </div>,

@@ -1,49 +1,34 @@
 import React, { useState, useEffect } from 'react';
-import { BookOpen, Clock, Calendar, CheckCircle, Circle, Globe, Loader } from 'lucide-react';
+import { BookOpen, Clock, Calendar, CheckCircle, Circle } from 'lucide-react';
 import { getChapterHistory } from '../../utils/reading-tracker';
-import { formatDuration, formatRelativeTime } from '../../utils/time-formatter';
+import { formatDuration, formatRelativeTime, formatLocalizedDate } from '../../utils/time-formatter';
 import { getTranslation } from '../../utils/translations';
 import type { ChapterHistory, TimeFormat, SortOption, FilterOption, ReadingPreferences } from '../../types';
+import { getInterfaceTheme } from '../../utils/themes';
 
 interface ChapterHistoryViewProps {
   timeFormat: TimeFormat;
   sortBy: SortOption;
   filterBy: FilterOption;
+  fileTypeFilter?: 'all' | 'epub' | 'pdf' | 'mobi' | 'azw3' | 'kfx' | 'azw';
+  genreFilter?: string;
   searchQuery: string;
   preferences?: ReadingPreferences;
-}
-
-// Simple translation service simulation
-const translateText = async (text: string, targetLang: string): Promise<string> => {
-  // This is a placeholder for actual translation service
-  // In a real implementation, you would use Google Translate API, DeepL, etc.
-  return new Promise((resolve) => {
-    setTimeout(() => {
-      // Mock translation - in reality this would call a translation API
-      resolve(`[${targetLang.toUpperCase()}] ${text}`);
-    }, 1000);
-  });
-};
-
-interface TranslationState {
-  [key: string]: {
-    isTranslating: boolean;
-    translatedText?: string;
-    originalText: string;
-    targetLanguage?: string;
-  };
+  selectedBookId?: string;
 }
 
 export const ChapterHistoryView: React.FC<ChapterHistoryViewProps> = ({
   timeFormat,
   sortBy,
   filterBy,
+  fileTypeFilter = 'all',
+  genreFilter = 'all',
   searchQuery,
-  preferences
+  preferences,
+  selectedBookId
 }) => {
   const [chapters, setChapters] = useState<ChapterHistory[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [translations, setTranslations] = useState<TranslationState>({});
 
   useEffect(() => {
     loadChapterHistory();
@@ -63,78 +48,26 @@ export const ChapterHistoryView: React.FC<ChapterHistoryViewProps> = ({
 
   // Get interface theme styles
   const getInterfaceStyles = () => {
-    if (!preferences?.interfaceColors) {
-      return {
-        backgroundColor: '#ffffff',
-        color: '#1f2937',
-        borderColor: '#e5e7eb',
-        panelBackground: '#ffffff',
-        panelSecondaryBackground: '#f9fafb'
-      };
-    }
+    const themeId = preferences?.selectedInterfaceTheme || 'light';
+    const subTheme = preferences?.snowSubTheme || 'day';
+    const menuStyle = preferences?.menuStyle || 'classic';
+    const theme = getInterfaceTheme(themeId, subTheme, menuStyle);
+    
+    const colors = themeId === 'custom' && preferences?.interfaceColors 
+      ? preferences.interfaceColors 
+      : theme.colors;
 
     return {
-      backgroundColor: preferences.interfaceColors.headerBackground || '#ffffff',
-      color: preferences.interfaceColors.headerText || '#1f2937',
-      borderColor: preferences.interfaceColors.headerBorder || '#e5e7eb',
-      panelBackground: preferences.interfaceColors.panelBackground || '#ffffff',
-      panelSecondaryBackground: preferences.interfaceColors.panelSecondaryBackground || '#f9fafb'
+      backgroundColor: colors.headerBackground || '#ffffff',
+      color: colors.headerText || '#1f2937',
+      borderColor: colors.headerBorder || '#e5e7eb',
+      panelBackground: colors.panelBackground || '#ffffff',
+      panelSecondaryBackground: colors.panelSecondaryBackground || '#f9fafb',
+      accent: colors.accent || '#007BFF'
     };
   };
 
   const interfaceStyles = getInterfaceStyles();
-
-  const handleTranslate = async (itemId: string, text: string, targetLang: string = 'en') => {
-    setTranslations(prev => ({
-      ...prev,
-      [itemId]: {
-        isTranslating: true,
-        originalText: text,
-        targetLanguage: targetLang
-      }
-    }));
-
-    try {
-      const translatedText = await translateText(text, targetLang);
-      setTranslations(prev => ({
-        ...prev,
-        [itemId]: {
-          ...prev[itemId],
-          isTranslating: false,
-          translatedText
-        }
-      }));
-    } catch (error) {
-      console.error('Translation failed:', error);
-      setTranslations(prev => ({
-        ...prev,
-        [itemId]: {
-          ...prev[itemId],
-          isTranslating: false
-        }
-      }));
-    }
-  };
-
-  const toggleTranslation = (itemId: string) => {
-    const translation = translations[itemId];
-    if (translation?.translatedText) {
-      // Remove translation to show original
-      setTranslations(prev => {
-        const newState = { ...prev };
-        delete newState[itemId];
-        return newState;
-      });
-    }
-  };
-
-  const getDisplayText = (itemId: string, originalText: string) => {
-    const translation = translations[itemId];
-    if (translation?.translatedText) {
-      return translation.translatedText;
-    }
-    return originalText;
-  };
 
   const formatReadTimes = (timesRead: number) => {
     const translation = getTranslation('readXTimes');
@@ -146,6 +79,11 @@ export const ChapterHistoryView: React.FC<ChapterHistoryViewProps> = ({
 
   const filteredAndSortedChapters = React.useMemo(() => {
     let filtered = chapters;
+
+    // Apply specific book filter if selected
+    if (selectedBookId && selectedBookId !== 'all') {
+      filtered = filtered.filter(chapter => chapter.bookId === selectedBookId);
+    }
 
     // Apply search filter
     if (searchQuery.trim()) {
@@ -181,6 +119,16 @@ export const ChapterHistoryView: React.FC<ChapterHistoryViewProps> = ({
         break;
     }
 
+    // Apply file type filter
+    if (fileTypeFilter !== 'all') {
+      filtered = filtered.filter(chapter => chapter.fileType === fileTypeFilter);
+    }
+
+    // Apply genre filter
+    if (genreFilter !== 'all') {
+      filtered = filtered.filter(chapter => chapter.tags?.includes(genreFilter));
+    }
+
     // Apply sorting
     switch (sortBy) {
       case 'date':
@@ -198,7 +146,7 @@ export const ChapterHistoryView: React.FC<ChapterHistoryViewProps> = ({
     }
 
     return filtered;
-  }, [chapters, searchQuery, filterBy, sortBy]);
+  }, [chapters, searchQuery, filterBy, sortBy, fileTypeFilter, genreFilter, selectedBookId]);
 
   if (isLoading) {
     return (
@@ -262,7 +210,7 @@ export const ChapterHistoryView: React.FC<ChapterHistoryViewProps> = ({
             <CheckCircle className="w-8 h-8 text-green-600" />
             <div className="ml-4">
               <p className="text-sm font-medium" style={{ color: interfaceStyles.color, opacity: 0.7 }}>
-                {getTranslation('complete')}
+                {getTranslation('completeChapters')}
               </p>
               <p className="text-2xl font-bold" style={{ color: interfaceStyles.color }}>
                 {filteredAndSortedChapters.filter(c => c.completed).length}
@@ -329,7 +277,6 @@ export const ChapterHistoryView: React.FC<ChapterHistoryViewProps> = ({
         <div className="divide-y" style={{ borderColor: interfaceStyles.borderColor }}>
           {filteredAndSortedChapters.map((chapter) => {
             const itemId = `${chapter.bookId}-${chapter.chapterIndex}`;
-            const translation = translations[itemId];
             
             return (
               <div key={itemId} className="p-6 hover:bg-gray-50 hover:bg-opacity-20 transition-colors">
@@ -342,56 +289,14 @@ export const ChapterHistoryView: React.FC<ChapterHistoryViewProps> = ({
                         <Circle className="w-5 h-5 text-gray-400 flex-shrink-0" />
                       )}
                       <h3 className="text-lg font-semibold truncate" style={{ color: interfaceStyles.color }}>
-                        {getDisplayText(`${itemId}-title`, chapter.chapterTitle)}
+                        {chapter.chapterTitle}
                       </h3>
-                      
-                      {/* Translation Button for Title */}
-                      <button
-                        onClick={() => {
-                          if (translation?.translatedText) {
-                            toggleTranslation(`${itemId}-title`);
-                          } else {
-                            handleTranslate(`${itemId}-title`, chapter.chapterTitle);
-                          }
-                        }}
-                        disabled={translation?.isTranslating}
-                        className="p-1 text-gray-400 hover:text-blue-600 transition-colors disabled:opacity-50"
-                        title={translation?.translatedText ? getTranslation('originalText') : getTranslation('translate')}
-                      >
-                        {translation?.isTranslating ? (
-                          <Loader className="w-4 h-4 animate-spin" />
-                        ) : (
-                          <Globe className="w-4 h-4" />
-                        )}
-                      </button>
                     </div>
                     
                     <div className="flex items-center gap-2 mb-2">
                       <p style={{ color: interfaceStyles.color, opacity: 0.7 }}>
-                        <span className="font-medium">{getDisplayText(`${itemId}-book`, chapter.bookTitle)}</span> by {getDisplayText(`${itemId}-author`, chapter.bookAuthor)}
+                        <span className="font-medium">{chapter.bookTitle}</span> by {chapter.bookAuthor}
                       </p>
-                      
-                      {/* Translation Button for Book Info */}
-                      <button
-                        onClick={() => {
-                          const bookInfo = `${chapter.bookTitle} by ${chapter.bookAuthor}`;
-                          const bookTranslation = translations[`${itemId}-book`];
-                          if (bookTranslation?.translatedText) {
-                            toggleTranslation(`${itemId}-book`);
-                          } else {
-                            handleTranslate(`${itemId}-book`, bookInfo);
-                          }
-                        }}
-                        disabled={translations[`${itemId}-book`]?.isTranslating}
-                        className="p-1 text-gray-400 hover:text-blue-600 transition-colors disabled:opacity-50"
-                        title={translations[`${itemId}-book`]?.translatedText ? getTranslation('originalText') : getTranslation('translate')}
-                      >
-                        {translations[`${itemId}-book`]?.isTranslating ? (
-                          <Loader className="w-4 h-4 animate-spin" />
-                        ) : (
-                          <Globe className="w-4 h-4" />
-                        )}
-                      </button>
                     </div>
                     
                     <div className="flex flex-wrap items-center gap-4 text-sm" style={{ color: interfaceStyles.color, opacity: 0.6 }}>
@@ -407,6 +312,38 @@ export const ChapterHistoryView: React.FC<ChapterHistoryViewProps> = ({
                       
                       <span>{formatReadTimes(chapter.timesRead)}</span>
                     </div>
+
+                    {/* Metadata / Tags Display */}
+                    {(chapter.fileType || (chapter.tags && chapter.tags.length > 0)) && (
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {chapter.fileType && (
+                          <span 
+                            className="px-2 py-0.5 rounded text-xs font-medium uppercase"
+                            style={{ 
+                              backgroundColor: `${interfaceStyles.accent}20`,
+                              color: interfaceStyles.accent,
+                              border: `1px solid ${interfaceStyles.accent}40`
+                            }}
+                          >
+                            {chapter.fileType}
+                          </span>
+                        )}
+                        {chapter.tags?.map(tag => (
+                          <span 
+                            key={tag}
+                            className="px-2 py-0.5 rounded text-xs font-medium"
+                            style={{ 
+                              backgroundColor: interfaceStyles.panelSecondaryBackground,
+                              color: interfaceStyles.color,
+                              opacity: 0.8,
+                              border: `1px solid ${interfaceStyles.borderColor}`
+                            }}
+                          >
+                            {getTranslation(tag.toLowerCase()) || tag}
+                          </span>
+                        ))}
+                      </div>
+                    )}
                   </div>
 
                   <div className="ml-4 text-right">
@@ -414,18 +351,10 @@ export const ChapterHistoryView: React.FC<ChapterHistoryViewProps> = ({
                       {getTranslation('chapter')} {chapter.chapterIndex + 1}
                     </div>
                     <div className="text-sm" style={{ color: interfaceStyles.color, opacity: 0.6 }}>
-                      {chapter.firstRead.toLocaleDateString()}
+                      {formatLocalizedDate(chapter.firstRead)}
                     </div>
                   </div>
                 </div>
-
-                {/* Translation Status */}
-                {translation?.isTranslating && (
-                  <div className="mt-2 text-sm text-blue-600 flex items-center gap-2">
-                    <Loader className="w-4 h-4 animate-spin" />
-                    {getTranslation('translating')}
-                  </div>
-                )}
               </div>
             );
           })}

@@ -1,9 +1,11 @@
 import * as pdfjsLib from 'pdfjs-dist';
+// @ts-expect-error - Vite handles ?url suffix
+import pdfWorker from 'pdfjs-dist/build/pdf.worker.mjs?url';
 import { saveCoverImage, logError } from './storage';
 import type { Book, Chapter } from '../types';
 
-// Configure PDF.js worker using CDN to avoid Vite dev server proxy issues
-pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
+// Configure PDF.js worker using local asset for offline support
+pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
 
 export class PdfParser {
   private pdf: any;
@@ -30,7 +32,7 @@ export class PdfParser {
     }
   }
 
-  async getMetadata(): Promise<{ title: string; author: string; cover?: string }> {
+  async getMetadata(): Promise<{ title: string; author: string; cover?: string; metadata?: any }> {
     try {
       if (this.isDestroyed) {
         throw new Error('Parser has been destroyed');
@@ -76,10 +78,23 @@ export class PdfParser {
         logError('PDF_COVER_GENERATION_FAILED', error);
       }
 
+      // Extract more detailed metadata
+      const info = metadata.info || {};
+      const extraMetadata: any = {
+        subject: info.Subject,
+        keywords: info.Keywords,
+        producer: info.Producer,
+        creator: info.Creator,
+        creationDate: info.CreationDate,
+        modDate: info.ModDate,
+        tags: info.Keywords ? info.Keywords.split(/[,;]+/).map((k: string) => k.trim()).filter(Boolean) : []
+      };
+
       return {
-        title: metadata.info?.Title || this.file.name.replace('.pdf', '') || 'Unknown Title',
-        author: metadata.info?.Author || 'Unknown Author',
-        cover
+        title: info.Title || this.file.name.replace('.pdf', '') || 'Unknown Title',
+        author: info.Author || 'Unknown Author',
+        cover,
+        metadata: extraMetadata
       };
     } catch (error) {
       logError('GET_PDF_METADATA_FAILED', error);
@@ -198,7 +213,30 @@ export class PdfParser {
         .map(sentence => `<p>${sentence}.</p>`)
         .join('\n');
 
-      return formattedText || `<p>Page ${pageNumber}</p>`;
+      // Render high-fidelity visual image of the PDF page with all illustrations/diagrams/images
+      let imageHtml = '';
+      try {
+        const viewport = page.getViewport({ scale: 1.35 });
+        const canvas = document.createElement('canvas');
+        canvas.width = viewport.width;
+        canvas.height = viewport.height;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          await page.render({
+            canvasContext: ctx,
+            viewport
+          }).promise;
+          const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+          imageHtml = `<div class="pdf-page-visual-container my-4 text-center select-none" data-page="${pageNumber}"><img src="${dataUrl}" alt="Página ${pageNumber}" class="pdf-page-image mx-auto rounded-xl shadow-lg border border-black/10 dark:border-white/10 max-w-full h-auto" /></div>`;
+        }
+        // Cleanup canvas dimensions
+        canvas.width = 0;
+        canvas.height = 0;
+      } catch (imgErr) {
+        console.warn(`Could not render visual page image for page ${pageNumber}:`, imgErr);
+      }
+
+      return `${imageHtml}<div class="pdf-extracted-text mt-4">${formattedText || `<p>Page ${pageNumber}</p>`}</div>`;
     } catch (error) {
       console.error('Error loading page content:', error);
       logError('GET_PDF_PAGE_CONTENT_FAILED', error, { pageNumber });
@@ -233,18 +271,26 @@ export class PdfParser {
       }
       
       const toc = await this.getTableOfContents();
+      const chaptersWithContent: Chapter[] = [];
       
-      const chaptersWithContent = await Promise.all(
-        toc.map(async (chapter) => {
-          try {
-            const content = await this.getChapterContent(chapter.href);
-            return { ...chapter, content };
-          } catch (error) {
-            console.warn(`Failed to load content for chapter: ${chapter.title}`, error);
-            return { ...chapter, content: '<p>Failed to load chapter content.</p>' };
-          }
-        })
-      );
+      // Load chapters in small sequential chunks to prevent memory spikes & UI freezing
+      const chunkSize = 5;
+      for (let i = 0; i < toc.length; i += chunkSize) {
+        if (this.isDestroyed) break;
+        const chunk = toc.slice(i, i + chunkSize);
+        const results = await Promise.all(
+          chunk.map(async (chapter) => {
+            try {
+              const content = await this.getChapterContent(chapter.href);
+              return { ...chapter, content };
+            } catch (error) {
+              console.warn(`Failed to load content for chapter: ${chapter.title}`, error);
+              return { ...chapter, content: '<p>Failed to load chapter content.</p>' };
+            }
+          })
+        );
+        chaptersWithContent.push(...results);
+      }
 
       return chaptersWithContent;
     } catch (error) {
@@ -253,25 +299,48 @@ export class PdfParser {
     }
   }
 
-  async searchText(query: string): Promise<Array<{ chapterIndex: number; matches: Array<{ text: string; position: number; start: number; end: number }> }>> {
+  async searchText(query: string, chapterIndex?: number): Promise<Array<{ chapterIndex: number; matches: Array<{ text: string; position: number; start: number; end: number }> }>> {
     try {
       if (this.isDestroyed) {
         throw new Error('Parser has been destroyed');
       }
       
-      // Check cache first
-      const cacheKey = query.toLowerCase();
+      // Check cache first with key distinct for full book vs specific chapter searches
+      const cacheKey = `${query.toLowerCase()}_ch_${chapterIndex !== undefined ? chapterIndex : 'all'}`;
       if (this.searchCache.has(cacheKey)) {
         return this.searchCache.get(cacheKey);
       }
       
-      const chapters = await this.getAllChapters();
+      let chaptersToSearch: Array<{ chapter: Chapter; originalIndex: number }> = [];
+      
+      if (chapterIndex !== undefined) {
+        const toc = await this.getTableOfContents();
+        const chapter = toc[chapterIndex];
+        if (chapter) {
+          try {
+            const content = await this.getChapterContent(chapter.href);
+            chaptersToSearch.push({
+              chapter: { ...chapter, content },
+              originalIndex: chapterIndex
+            });
+          } catch (e) {
+            console.warn(`Failed to load content for search chapter ${chapterIndex}:`, e);
+          }
+        }
+      } else {
+        const allChapters = await this.getAllChapters();
+        chaptersToSearch = allChapters.map((chapter, index) => ({
+          chapter,
+          originalIndex: index
+        }));
+      }
+      
       const results: Array<{ chapterIndex: number; matches: Array<{ text: string; position: number; start: number; end: number }> }> = [];
       
       // Use a more efficient search approach for large texts
       const searchRegex = new RegExp(query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
 
-      chapters.forEach((chapter, index) => {
+      chaptersToSearch.forEach(({ chapter, originalIndex }) => {
         try {
           const content = this.stripHtml(chapter.content);
           const matches: Array<{ text: string; position: number; start: number; end: number }> = [];
@@ -304,10 +373,10 @@ export class PdfParser {
           }
 
           if (matches.length > 0) {
-            results.push({ chapterIndex: index, matches });
+            results.push({ chapterIndex: originalIndex, matches });
           }
         } catch (error) {
-          console.warn(`Search failed for chapter ${index}:`, error);
+          console.warn(`Search failed for chapter ${originalIndex}:`, error);
         }
       });
 
@@ -321,18 +390,26 @@ export class PdfParser {
 
       return results;
     } catch (error) {
-      logError('PDF_SEARCH_TEXT_FAILED', error, { query });
+      logError('PDF_SEARCH_TEXT_FAILED', error, { query, chapterIndex });
       throw error;
     }
   }
 
   private stripHtml(html: string): string {
+    if (!html) return '';
     try {
-      const div = document.createElement('div');
-      div.innerHTML = html;
-      return div.textContent || div.innerText || '';
+      // High-performance regex-based HTML tag removal, avoiding costly browser DOM parsing
+      let text = html.replace(/<[^>]*>/g, ' ');
+      text = text
+        .replace(/&nbsp;/gi, ' ')
+        .replace(/&lt;/gi, '<')
+        .replace(/&gt;/gi, '>')
+        .replace(/&amp;/gi, '&')
+        .replace(/&quot;/gi, '"')
+        .replace(/&#39;/gi, "'");
+      return text.replace(/\s+/g, ' ').trim();
     } catch (error) {
-      console.warn('Failed to strip HTML:', error);
+      console.warn('Failed to strip HTML with regex:', error);
       return html;
     }
   }
@@ -410,15 +487,24 @@ export const createBookFromPdfFile = async (file: File): Promise<Omit<Book, 'id'
     await parser.initialize();
     
     const metadata = await parser.getMetadata();
+    const toc = await parser.getTableOfContents();
+    const chaptersCount = toc.length;
     
     const book: Omit<Book, 'id'> = {
       title: metadata.title,
       author: metadata.author,
       cover: metadata.cover,
+      metadata: {
+        ...(metadata.metadata || {}),
+        chaptersCount,
+        chapters: toc.map(c => ({ id: c.id, title: c.title, href: c.href, order: c.order }))
+      },
       file,
       addedAt: new Date(),
+      lastRead: new Date(),
       progress: 0,
       currentChapter: 0,
+      totalPages: chaptersCount,
       scrollPosition: 0,
       fileType: 'pdf' // Add file type identifier
     };

@@ -1,39 +1,51 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { saveBook, getBook } from '../utils/storage';
 import type { Book } from '../types';
 
-export const useReadingProgress = (bookId: string) => {
-  const [book, setBook] = useState<Book | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+export const useReadingProgress = (bookId: string, initialBook?: Book | null) => {
+  const [book, setBook] = useState<Book | null>(initialBook || null);
+  const [isLoading, setIsLoading] = useState(!initialBook);
   const [lastSave, setLastSave] = useState<Date>(new Date());
 
   // Load book data
   useEffect(() => {
+    let isMounted = true;
     const loadBook = async () => {
       try {
         const bookData = await getBook(bookId);
-        if (bookData) {
+        if (bookData && isMounted) {
           setBook(bookData);
         }
       } catch (error) {
         console.error('Error loading book:', error);
       } finally {
-        setIsLoading(false);
+        if (isMounted) {
+          setIsLoading(false);
+        }
       }
     };
 
     if (bookId) {
       loadBook();
     }
+    return () => { isMounted = false; };
   }, [bookId]);
 
-  // Auto-save progress every 30 seconds
+  // Create a ref to store the latest book state for stable interval auto-saves
+  const bookRef = useRef<Book | null>(book);
   useEffect(() => {
-    if (!book) return;
+    bookRef.current = book;
+  }, [book]);
+
+  // Auto-save progress every 30 seconds stably
+  useEffect(() => {
+    if (!bookId) return;
 
     const interval = setInterval(async () => {
+      const currentBook = bookRef.current;
+      if (!currentBook) return;
       try {
-        await saveBook(book);
+        await saveBook(currentBook, true);
         setLastSave(new Date());
       } catch (error) {
         console.error('Error auto-saving progress:', error);
@@ -41,29 +53,30 @@ export const useReadingProgress = (bookId: string) => {
     }, 30000);
 
     return () => clearInterval(interval);
-  }, [book]);
+  }, [bookId]);
 
   const updateProgress = useCallback(async (updates: Partial<Pick<Book, 'progress' | 'currentChapter' | 'scrollPosition' | 'lastRead'>>) => {
-    if (!book) return;
+    setBook((prevBook) => {
+      const targetBook = prevBook || initialBook;
+      if (!targetBook) return null;
 
-    const updatedBook = {
-      ...book,
-      ...updates,
-      lastRead: new Date()
-    };
+      const updatedBook: Book = {
+        ...targetBook,
+        ...updates,
+        lastRead: new Date()
+      };
 
-    setBook(updatedBook);
-
-    // Save immediately on chapter change
-    if (updates.currentChapter !== undefined && updates.currentChapter !== book.currentChapter) {
-      try {
-        await saveBook(updatedBook);
+      // Save immediately
+      saveBook(updatedBook, true).then(() => {
         setLastSave(new Date());
-      } catch (error) {
-        console.error('Error saving progress on chapter change:', error);
-      }
-    }
-  }, [book]);
+        window.dispatchEvent(new CustomEvent('booksChanged', { detail: { bookId: updatedBook.id } }));
+      }).catch((error) => {
+        console.error('Error saving progress:', error);
+      });
+
+      return updatedBook;
+    });
+  }, [initialBook]);
 
   const saveProgress = useCallback(async () => {
     if (!book) return;

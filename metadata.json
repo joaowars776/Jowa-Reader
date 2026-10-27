@@ -1,5 +1,8 @@
 {
-  "name": "eBook Reader Pro",
-  "description": "A professional eBook reader supporting EPUB and PDF formats with reading history and statistics.",
-  "requestFramePermissions": []
+  "name": "Novel Reader",
+  "description": "A feature-rich web-based novel reader supporting EPUB and PDF formats, with customizable reading settings.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
 }

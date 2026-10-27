@@ -1,46 +1,66 @@
 ## 📖 Novel-Reader: ePUB & PDF Reader (Offline, Portable, Multi-Language)
 
-## Wuxia / Xianxia / Xuanhuan Readers, this is for you, but also for everyone else!
+### Wuxia / Xianxia / Xuanhuan Readers, this is for you, but also for everyone else!
 
-A lightweight, offline, customizable reader for EPUB and PDF — built especially for webnovel and light novel fans.
-I started this project out of love for Wuxia, Xianxia, Xuanhuan and light novels in general. With sites like LightNovelPub shutting down, I realized how fragile access to these stories is — so I built my own solution.
+A lightweight, offline, customizable reader for EPUB, PDF, MOBI, AZW, and TXT files — built especially for webnovel and light novel fans.
+I started this project out of love for Wuxia, Xianxia, Xuanhuan and light novels in general. With sites shutting down and online access becoming fragile, I built my own 100% private and portable solution.
 
-Thanks to browser translation (Chrome, Firefox, etc.), you can instantly read any novel in your language. I personally have 8GB of novels archived and can enjoy them fully translated while offline.
+💬 Need help? Message me on Discord: **joaowars776**
 
-💬 Need help? Message me on Discord: joaowars776
+---
 
-## ✨ Features
-  🌐 20 Languages (Portuguese, English, Chinese, French, Urdu, Thai, Dutch, Yoruba, Indonesian, Japanese, Spanish, German, Hindi, Italian, Korean, Russian, Swahili, Turkish… and More)<br>
-  🎨 Themes: Light, dark, night mode, eye-protection themes and some more<br>
-  🔠 Text Controls: Font size, Text Spacing, Paragraph Spacing, Typeface, Fullscreen mode, Mobile mode and more<br>
-  📌 Bookmarks: Chapter and Texts save, you can mark your text with colors, and see on Bookmarks area<br>
-  📊 My Statistics: Track reading time, chapters read, history, average pace<br>
-  📂 Add Books: Select a folder with multiple .epub / .pdf and enjoy!<br>
-  🧭 Search: Search any Text/Word inside the current chapter or across the entire book<br>
-  🗂 Reading Progression: Quickly continue where you left off<br>
-  🔄 Auto-Save: Settings + progress cached locally (You can use a Portable Browser for never loose that if you care) You can also Export and Import your entire Data, literally<br>
-  🗣 Read Aloud (TTS): Experimental text-to-speech option<br>
-  🖥 Offline & Portable: Works without internet, 100% local<br>
-  ⚡ Performance Optimized: Debounced events, GPU-accelerated animations, memory-leak prevention and much more
-##
-## ⚙️ Installation & Usage (necessary: NodeJS)
-  # Run on Desktop:
+## ✨ What's New & Core Features
 
-Install.bat and Start.bat inside, you just need to Install NodeJS and execute Install.bat for just one time, and after, just use the Start.run
+### 🌐 20 Supported Languages
+Enjoy the entire interface and reading tools in 20 global languages:
+<br>
+🇺🇸 **English** | 🇧🇷 **Português** | 🇪🇸 **Español** | 🇫🇷 **Français** | 🇩🇪 **Deutsch** | 🇮🇹 **Italiano** | 🇳🇱 **Nederlands** | 🇷🇺 **Русский** | 🇹🇷 **Türkçe** | 🇮🇳 **हिन्दी** | 🇮🇩 **Indonesian** | 🇹🇭 **ไทย** | 🇵🇰 **اردو** | 🇳🇬 **Yoruba** | 🇯🇵 **日本語** | 🇰🇷 **한국어** | 🇨🇳 **中文** | 🇧🇩 **বাংলা** | 🇸🇦 **العربية** | 🇹🇿 **Swahili**
 
-## Manual Installation:
+### 🤖 Offline Translation & AI Support
+- **Offline Translation (LibreTranslate - No AI):** Translate selected text passages or entire chapters privately and locally using your own LibreTranslate instance, with a one-click startup script (`Start-LibreTranslate.bat`).
+- **Full-Book AI Translator (Ollama Support):** Translate entire EPUB/PDF books in the background with local neural models, featuring live progress metrics, persistent state, and an automated EPUB compiler that packages your translated eBook instantly.
+
+### 🏛️ Interface Themes & Styles
+Customize the layout and aesthetic of menus, sidebars, and control panels with distinct interface themes:
+- **Classic:** Clean, traditional, and high-contrast window styling.
+- **Wooden:** Warm, cozy, and textured timber aesthetics.
+- **Neon:** Vibrant, cyberpunk-inspired glow accents with custom color pickers.
+- **Retro 8-Bit:** Nostalgic pixelated styling and retro window borders.
+
+### 🎨 Visual Themes, Glassmorphism & Atmospheric Effects
+- **Visual Color Themes:** Rich reading canvas palettes including Light, Dark, Night mode, Sepia, High Contrast, Rain, Snow, and Aurora sub-themes.
+- **Glassmorphism:** Frosted glass blur effects with customizable opacity, blur sliders, backdrop variations, and tint colors.
+- **Atmospheric Particle Canvases:** Full-screen animated weather particles including falling Rain (with adjustable intensity), floating Snow, and Aurora petals.
+- **Colored Side Margins:** Adjustable lateral book margins (0–150px) framing the reading canvas with custom colors and animated effects (pulse, snow, rain, thunder, sand).
+
+### 📝 Notes & Study Workspace
+- **Dedicated Notes Area:** A fully integrated study and note-taking workspace right inside your library and reader. Create unlimited notes with customizable card colors, font families, and sizes, featuring automatic saving, per-profile isolation, unified bookmark aggregation, and a 30-day recycling trash bin.
+
+### 📊 Reading History & Statistics
+- **Reading History & Stats Hub:** Track your reading journey in depth. View total reading time, books read, chapters read, current/longest reading streaks, average pace, detailed activity logs, trend charts, and quick chapter continuation history.
+
+### 📖 Reading Experience & Progress Tracking
+- **Mark Read Text:** Automatically tracks your reading progression by highlighting paragraphs scrolled past the top viewport for over 3 seconds (with intelligent scroll-back detection and 4 distinct styles: fade, underline, strikethrough, or highlight).
+- **Bookmarks & Highlights:** Highlight text passages with custom colors, add notes, and organize everything in a dedicated study workspace.
+
+### 👥 User Profiles & Server-Side Persistence
+- **Instant Profile Switcher:** Manage multiple separate user accounts instantly, keeping libraries, reading streaks, notes, favorites, and settings strictly isolated.
+- **Server Disk Storage:** Automatic file recovery and persistence under `/UserData/`, ensuring your books and progress are never lost even if the browser cache is cleared.
+
+### 💾 Data Manager & Backup
+- **Full ZIP Backup & Restore:** Export your entire reader into a standalone `.zip` archive preserving book files, covers, history, notes, user profiles, favorites, and exact custom preferences.
+
+---
+
+## ⚙️ Installation & Usage
+
+### 🚀 Quick Start (Windows):
+1. **Run.bat**: Double-click this to automatically install dependencies (on first run) and start the reader instantly!
+
+### 💻 Manual Installation:
 <pre>npm install</pre>
 <pre>npm run dev</pre>
 Access at: http://localhost:5173/
-# Just a Text Tutorial, you don't need since there's a Install.bat and Start.bat inside, you just need to Install NodeJS and execute Install.bat for just one time, and after, just use the Start.run
 
-# Run for all devices in Wi-Fi
-<pre>npm install -g serve</pre>
-<pre>serve -s dist</pre>
-
-Copy the IP that will show into your phone’s browser or even console or TV browser. Done!
-![{0ACCEFCF-249E-4AFB-9316-C4FFF4641C73}](https://github.com/user-attachments/assets/81bd814e-d28d-4a44-b7e6-da5eea06914a)<br>
-- Network one
-
-### See the Releases area to see all the changelogs maded
-
+### 📦 100% Portability Notice:
+This project is inherently portable by design, storing all user accounts, settings, notes, and books locally under `/UserData/`. If you want a completely portable Node.js environment, you can download the Node.js portable ZIP archive, extract it into the project folder, and point `Run.bat` to use that specific Node executable. This makes the entire application and runtime 100% self-contained and portable!

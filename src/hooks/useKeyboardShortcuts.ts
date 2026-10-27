@@ -1,4 +1,5 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
+import type { ReadingPreferences } from '../types';
 
 interface KeyboardShortcuts {
   onNextChapter?: () => void;
@@ -11,7 +12,21 @@ interface KeyboardShortcuts {
   onDecreaseFontSize?: () => void;
 }
 
-export const useKeyboardShortcuts = (shortcuts: KeyboardShortcuts) => {
+export const useKeyboardShortcuts = (shortcuts: KeyboardShortcuts, preferences?: ReadingPreferences) => {
+  // Keep shortcuts and preferences in refs so that the event listener is registered ONLY ONCE
+  // and doesn't get re-bound on every render due to new object/callback identities!
+  const shortcutsRef = useRef<KeyboardShortcuts>(shortcuts);
+  const preferencesRef = useRef<ReadingPreferences | undefined>(preferences);
+
+  // Update refs on every render
+  useEffect(() => {
+    shortcutsRef.current = shortcuts;
+  });
+
+  useEffect(() => {
+    preferencesRef.current = preferences;
+  }, [preferences]);
+
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       // Ignore if user is typing in an input field
@@ -19,59 +34,60 @@ export const useKeyboardShortcuts = (shortcuts: KeyboardShortcuts) => {
         return;
       }
 
-      const { key, ctrlKey, metaKey, shiftKey } = event;
-      const isModifierPressed = ctrlKey || metaKey;
+      const { key } = event;
+      
+      // Helper to format key string for comparison
+      const formatKey = (e: KeyboardEvent) => {
+        let keyStr = e.key;
+        if (e.ctrlKey || e.metaKey) keyStr = `Ctrl + ${keyStr}`;
+        if (e.shiftKey) keyStr = `Shift + ${keyStr}`;
+        if (e.altKey) keyStr = `Alt + ${keyStr}`;
+        return keyStr.toLowerCase();
+      };
 
-      switch (true) {
-        // Navigation
-        case key === 'ArrowRight' && !isModifierPressed:
-          event.preventDefault();
-          shortcuts.onNextChapter?.();
-          break;
-        case key === 'ArrowLeft' && !isModifierPressed:
-          event.preventDefault();
-          shortcuts.onPreviousChapter?.();
-          break;
+      const pressedKey = formatKey(event);
 
-        // Menu toggles
-        case key === 'm' && !isModifierPressed:
-          event.preventDefault();
-          shortcuts.onToggleMenu?.();
-          break;
-        case key === 's' && !isModifierPressed:
-          event.preventDefault();
-          shortcuts.onToggleSettings?.();
-          break;
+      // Helper to check if a key matches any of the allowed keys for an action
+      const matches = (actionId: string, defaultKeys: string[]) => {
+        const userKeys = preferencesRef.current?.shortcuts?.[actionId] || [];
+        const allowedKeys = [
+          ...userKeys.filter(k => k !== ''),
+          ...(userKeys.length === 0 ? defaultKeys : [])
+        ].map(k => k.toLowerCase());
 
-        // Fullscreen
-        case key === 'f' && !isModifierPressed:
-          event.preventDefault();
-          shortcuts.onToggleFullscreen?.();
-          break;
+        return allowedKeys.includes(pressedKey) || allowedKeys.includes(key.toLowerCase());
+      };
 
-        // Search
-        case key === '/' && !isModifierPressed:
-        case (key === 'f' && isModifierPressed):
-          event.preventDefault();
-          shortcuts.onSearch?.();
-          break;
+      const currentShortcuts = shortcutsRef.current;
 
-        // Font size
-        case (key === '=' && !isModifierPressed) || (key === 'h' && isModifierPressed):
-          event.preventDefault();
-          shortcuts.onIncreaseFontSize?.();
-          break;
-        case (key === '-' && !isModifierPressed) || (key === '-' && isModifierPressed):
-          event.preventDefault();
-          shortcuts.onDecreaseFontSize?.();
-          break;
-
-        default:
-          break;
+      if (matches('nextChapter', ['ArrowRight'])) {
+        event.preventDefault();
+        currentShortcuts.onNextChapter?.();
+      } else if (matches('previousChapter', ['ArrowLeft'])) {
+        event.preventDefault();
+        currentShortcuts.onPreviousChapter?.();
+      } else if (matches('toggleMenu', ['m'])) {
+        event.preventDefault();
+        currentShortcuts.onToggleMenu?.();
+      } else if (matches('toggleSettings', ['s'])) {
+        event.preventDefault();
+        currentShortcuts.onToggleSettings?.();
+      } else if (matches('toggleFullscreen', ['F11'])) {
+        event.preventDefault();
+        currentShortcuts.onToggleFullscreen?.();
+      } else if (matches('search', ['/'])) {
+        event.preventDefault();
+        currentShortcuts.onSearch?.();
+      } else if (matches('increaseFontSize', ['='])) {
+        event.preventDefault();
+        currentShortcuts.onIncreaseFontSize?.();
+      } else if (matches('decreaseFontSize', ['-'])) {
+        event.preventDefault();
+        currentShortcuts.onDecreaseFontSize?.();
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [shortcuts]);
+  }, []); // Run ONLY once! Absolutely stable.
 };

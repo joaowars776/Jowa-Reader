@@ -1,8 +1,10 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { Search, X, ArrowRight, BookOpen, FileText } from 'lucide-react';
-import { getTranslation } from '../../utils/translations';
+import { useTranslations } from '../../hooks/useTranslations';
+import { getInterfaceTheme } from '../../utils/themes';
 import type { SearchResult, ReadingPreferences } from '../../types';
+import { InterfaceEffectsOverlay } from './InterfaceEffectsOverlay';
 
 interface SearchModalProps {
   onSearch: (query: string, searchScope: 'chapter' | 'book') => void;
@@ -24,6 +26,7 @@ export const SearchModal: React.FC<SearchModalProps> = ({
   preferences,
   currentChapterTitle = 'Current Chapter'
 }) => {
+  const { getTranslation } = useTranslations();
   const [query, setQuery] = useState('');
   const [isSearching, setIsSearching] = useState(false);
   const [searchScope, setSearchScope] = useState<'chapter' | 'book'>('chapter');
@@ -34,20 +37,58 @@ export const SearchModal: React.FC<SearchModalProps> = ({
 
   // Memoize interface styles to prevent recalculation
   const interfaceStyles = useMemo(() => {
-    if (!preferences?.interfaceColors) {
-      return {
-        backgroundColor: '#ffffff',
-        color: '#1f2937',
-        borderColor: '#e5e7eb'
-      };
+    const themeId = preferences?.selectedInterfaceTheme || 'light';
+    const subTheme = preferences?.snowSubTheme || 'day';
+    const menuStyle = preferences?.menuStyle || 'classic';
+    const linkStyle = preferences?.linkStyleWithTheme !== false;
+    const menuSubTheme = preferences?.menuSubTheme || 'default';
+    const neonCustomColor = preferences?.neonCustomColor;
+    const glassEnabled = (preferences?.glassEnabled ?? false) && !(preferences?.glassReaderAreaOnly ?? false);
+    const glassTintColor = preferences?.glassTintColor;
+
+    const theme = getInterfaceTheme(
+      themeId,
+      subTheme,
+      menuStyle,
+      linkStyle,
+      menuSubTheme,
+      neonCustomColor,
+      glassEnabled,
+      glassTintColor
+    );
+    
+    let colors = theme.colors;
+    if (themeId === 'custom' && preferences?.interfaceColors) {
+      colors = preferences.interfaceColors;
     }
 
     return {
-      backgroundColor: preferences.interfaceColors.panelBackground || '#ffffff',
-      color: preferences.interfaceColors.panelText || '#1f2937',
-      borderColor: preferences.interfaceColors.borderColor || '#e5e7eb'
+      backgroundColor: colors.panelBackground || colors.headerBackground || '#ffffff',
+      color: colors.panelText || colors.headerText || '#1f2937',
+      borderColor: colors.panelBorder || colors.headerBorder || '#e5e7eb'
     };
-  }, [preferences?.interfaceColors]);
+  }, [
+    preferences?.selectedInterfaceTheme,
+    preferences?.snowSubTheme,
+    preferences?.menuStyle,
+    preferences?.linkStyleWithTheme,
+    preferences?.interfaceColors,
+    preferences?.menuSubTheme,
+    preferences?.neonCustomColor,
+    preferences?.glassEnabled,
+    preferences?.glassReaderAreaOnly,
+    preferences?.glassTintColor
+  ]);
+
+  const isDarkTheme = useMemo(() => {
+    const themeId = preferences?.selectedInterfaceTheme || 'light';
+    const subTheme = preferences?.snowSubTheme || 'day';
+    return themeId === 'dark' || themeId === 'midnight' || themeId === 'highcontrast' || themeId === 'aurora' || (themeId === 'snow' && subTheme !== 'day') || (themeId === 'rain' && subTheme !== 'day');
+  }, [preferences?.selectedInterfaceTheme, preferences?.snowSubTheme]);
+
+  const glassEnabled = useMemo(() => {
+    return (preferences?.glassEnabled ?? false) && !(preferences?.glassReaderAreaOnly ?? false);
+  }, [preferences?.glassEnabled, preferences?.glassReaderAreaOnly]);
 
   // Memoize displayed results for performance
   const displayedResults = useMemo(() => {
@@ -60,7 +101,10 @@ export const SearchModal: React.FC<SearchModalProps> = ({
 
   // Reset visible results when search results change
   useEffect(() => {
-    setVisibleResults(RESULTS_PER_PAGE);
+    const timeoutId = setTimeout(() => {
+      setVisibleResults(RESULTS_PER_PAGE);
+    }, 0);
+    return () => clearTimeout(timeoutId);
   }, [searchResults]);
 
   // Close modal when clicking outside
@@ -102,13 +146,19 @@ export const SearchModal: React.FC<SearchModalProps> = ({
       return;
     }
 
-    setIsSearching(true);
+    const startTimeoutId = setTimeout(() => {
+      setIsSearching(true);
+    }, 0);
+
     const timeoutId = setTimeout(() => {
       onSearch(query, searchScope);
       setIsSearching(false);
     }, 300);
 
-    return () => clearTimeout(timeoutId);
+    return () => {
+      clearTimeout(startTimeoutId);
+      clearTimeout(timeoutId);
+    };
   }, [query, searchScope, onSearch]);
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -154,7 +204,7 @@ export const SearchModal: React.FC<SearchModalProps> = ({
     }
     
     return `${getTranslation('foundResults').replace('{count}', total + '+').replace('{plural}', getTranslation('results')).replace('"{query}"', '')} (${getTranslation('showingFirstResults')} ${showing})`;
-  }, [searchResults.length, visibleResults]);
+  }, [searchResults.length, visibleResults, getTranslation]);
 
   // Memoize scope results text
   const scopeResultsText = useMemo(() => {
@@ -162,30 +212,29 @@ export const SearchModal: React.FC<SearchModalProps> = ({
       return getTranslation('searchIn').toLowerCase() + ' ' + getTranslation('currentChapter').toLowerCase();
     }
     return getTranslation('searchIn').toLowerCase() + ' ' + getTranslation('entireBook').toLowerCase();
-  }, [searchScope]);
+  }, [searchScope, getTranslation]);
 
   return createPortal(
-    <div className="fixed inset-0 bg-black/50 z-[100] flex items-start justify-center pt-20 animate-fade-in backdrop-blur-sm">
+    <div className={`fixed inset-0 z-[100] flex items-start justify-center pt-20 animate-fade-in backdrop-blur-sm transition-all duration-300 ${glassEnabled && !isDarkTheme ? 'bg-white/20' : 'bg-black/50'}`}>
       <div 
         ref={modalRef} 
-        className="rounded-xl shadow-xl w-full max-w-2xl mx-4 max-h-[80vh] overflow-hidden animate-scale-in"
+        className="relative rounded-xl shadow-xl w-full max-w-2xl mx-4 max-h-[80vh] overflow-hidden animate-scale-in"
         style={{
           backgroundColor: interfaceStyles.backgroundColor,
           fontFamily: preferences?.applyFontGlobally ? 
-            (preferences.fontFamily === 'Inter' ? 'Inter, sans-serif' : 
-             preferences.fontFamily === 'JetBrains Mono' ? 'JetBrains Mono, monospace' :
-             preferences.fontFamily === 'Crimson Text' ? 'Crimson Text, serif' :
-             preferences.fontFamily === 'Source Sans Pro' ? 'Source Sans Pro, sans-serif' :
+            (preferences.fontFamily === 'Arial' ? 'Arial, Helvetica, sans-serif' : 
+             preferences.fontFamily === 'Inter' ? 'Inter, sans-serif' :
              'Georgia, serif') : undefined
         }}
       >
+        <InterfaceEffectsOverlay preferences={preferences} target="interface" />
         {/* Search Header */}
         <div 
           className="flex items-center gap-4 p-4 border-b"
           style={{ borderColor: interfaceStyles.borderColor }}
         >
-          <Search className="w-5 h-5" style={{ color: interfaceStyles.color, opacity: 0.6 }} />
-          <form onSubmit={handleSubmit} className="flex-1">
+          <Search className="w-5 h-5 shrink-0" style={{ color: interfaceStyles.color, opacity: 0.6 }} />
+          <form onSubmit={handleSubmit} className="flex-1 min-w-0">
             <input
               ref={inputRef}
               type="text"
@@ -198,7 +247,7 @@ export const SearchModal: React.FC<SearchModalProps> = ({
           </form>
           <button
             onClick={onClose}
-            className="p-2 hover:bg-gray-100 hover:bg-opacity-20 rounded-lg transition-all duration-300"
+            className="p-2 hover:bg-gray-100 hover:bg-opacity-20 rounded-lg transition-all duration-300 shrink-0"
             style={{ color: interfaceStyles.color }}
             aria-label={getTranslation('search')}
           >

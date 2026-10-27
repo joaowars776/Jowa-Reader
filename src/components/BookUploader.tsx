@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { Upload, BookOpen, X, FileText, File, Folder, Info } from 'lucide-react';
 import { createBookFromSupportedFile, getSupportedFileTypes, getFileType } from '../utils/file-parser';
 import { saveBook } from '../utils/storage';
+import { logActivity } from '../utils/activity-logger';
 import { getTranslation } from '../utils/translations';
 import type { Book } from '../types';
 
@@ -23,14 +24,19 @@ export const BookUploader: React.FC<BookUploaderProps> = ({ onBookAdded, onClose
   const supportedTypes = getSupportedFileTypes();
 
   useEffect(() => {
+    let timer: NodeJS.Timeout;
     const handleClickOutside = (event: MouseEvent) => {
       if (modalContentRef.current && !modalContentRef.current.contains(event.target as Node)) {
         onClose?.();
       }
     };
 
-    document.addEventListener('mousedown', handleClickOutside);
+    timer = setTimeout(() => {
+      document.addEventListener('mousedown', handleClickOutside);
+    }, 50);
+
     return () => {
+      clearTimeout(timer);
       document.removeEventListener('mousedown', handleClickOutside);
     };
   }, [onClose]);
@@ -55,25 +61,24 @@ export const BookUploader: React.FC<BookUploaderProps> = ({ onBookAdded, onClose
 
       if (book.cover) {
         try {
-          if (book.fileType === 'epub') {
-            const { EpubParser } = await import('../utils/epub-parser');
-            const parser = new EpubParser(file);
-            await parser.initialize();
-            await parser.cacheCoverImage(book.id);
-            parser.destroy();
-          } else if (book.fileType === 'pdf') {
-            const { PdfParser } = await import('../utils/pdf-parser');
-            const parser = new PdfParser(file);
-            await parser.initialize();
-            await parser.cacheCoverImage(book.id);
-            parser.destroy();
+          const { createParserForFile } = await import('../utils/file-parser');
+          const parser = createParserForFile(file);
+          await (parser as any).initialize();
+          if (typeof (parser as any).cacheCoverImage === 'function') {
+            await (parser as any).cacheCoverImage(book.id);
           }
+          parser.destroy();
         } catch (coverError) {
           console.warn('Could not cache cover image:', coverError);
         }
       }
 
       await saveBook(book);
+      logActivity({
+        type: 'add_book',
+        bookId: book.id,
+        bookTitle: book.title
+      });
       onBookAdded(book);
       onClose?.();
     } catch (error) {
@@ -165,12 +170,17 @@ export const BookUploader: React.FC<BookUploaderProps> = ({ onBookAdded, onClose
       {/* Modal Content */}
       <div 
         ref={modalContentRef} 
-        className="bg-white rounded-[2rem] max-w-2xl w-full p-8 relative animate-scale-in shadow-2xl border border-white/20 themed-panel my-auto z-10"
+        className="rounded-[2rem] max-w-2xl w-full p-8 relative animate-scale-in shadow-2xl border themed-panel my-auto z-10"
+        style={{
+          backgroundColor: 'var(--interface-panelBackground, #ffffff)',
+          color: 'var(--interface-textPrimary, #1f2937)',
+          borderColor: 'var(--interface-borderColor, rgba(255, 255, 255, 0.2))'
+        }}
       >
         {onClose && (
           <button
             onClick={onClose}
-            className="absolute top-6 right-6 p-2 hover:bg-black/5 dark:hover:bg-white/10 rounded-full transition-all duration-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 z-20"
+            className="absolute top-6 right-6 p-2 hover:bg-black/5 dark:hover:bg-white/10 rounded-full transition-colors duration-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 z-20"
             aria-label={getTranslation('closeUploader')}
           >
             <X className="w-6 h-6" style={{ color: 'var(--interface-textSecondary)' }} />
@@ -198,7 +208,7 @@ export const BookUploader: React.FC<BookUploaderProps> = ({ onBookAdded, onClose
           onDragEnter={handleDragEnter}
           data-drop-zone="true"
         >
-          <div className={`w-20 h-20 bg-gray-50 dark:bg-gray-800/50 rounded-full flex items-center justify-center mx-auto mb-6 transition-all duration-500 ${isDragOver ? 'scale-110 bg-blue-100 dark:bg-blue-900/30' : ''}`}>
+          <div className={`w-20 h-20 bg-gray-50 dark:bg-zinc-800/50 border border-gray-100 dark:border-zinc-700/30 rounded-full flex items-center justify-center mx-auto mb-6 transition-transform duration-500 ${isDragOver ? 'scale-110 bg-blue-50 dark:bg-blue-900/30' : ''}`}>
             <Upload 
               className={`w-10 h-10 transition-all duration-500 ${isDragOver ? 'text-blue-500' : 'text-gray-400'}`} 
             />
@@ -275,14 +285,30 @@ export const BookUploader: React.FC<BookUploaderProps> = ({ onBookAdded, onClose
 
         <div className="mt-10 pt-8 border-t border-gray-100 dark:border-gray-800">
           <div className="flex flex-col md:flex-row items-center justify-between gap-6">
-            <div className="flex gap-3">
-              <div className="flex items-center gap-2 px-4 py-2 rounded-xl bg-gray-50 dark:bg-gray-800/50 border border-gray-100 dark:border-gray-800">
+            <div className="flex flex-wrap gap-3 justify-center">
+              <div className="flex items-center gap-2 px-4 py-2 rounded-xl bg-gray-50/70 dark:bg-zinc-800/60 border border-gray-100 dark:border-zinc-700/50">
                 <FileText className="w-4 h-4 text-blue-500" />
                 <span className="text-xs font-bold tracking-wider" style={{ color: 'var(--interface-textPrimary)' }}>EPUB</span>
               </div>
-              <div className="flex items-center gap-2 px-4 py-2 rounded-xl bg-gray-50 dark:bg-gray-800/50 border border-gray-100 dark:border-gray-800">
+              <div className="flex items-center gap-2 px-4 py-2 rounded-xl bg-gray-50/70 dark:bg-zinc-800/60 border border-gray-100 dark:border-zinc-700/50">
                 <File className="w-4 h-4 text-red-500" />
                 <span className="text-xs font-bold tracking-wider" style={{ color: 'var(--interface-textPrimary)' }}>PDF</span>
+              </div>
+              <div className="flex items-center gap-2 px-4 py-2 rounded-xl bg-gray-50/70 dark:bg-zinc-800/60 border border-gray-100 dark:border-zinc-700/50">
+                <File className="w-4 h-4 text-amber-500" />
+                <span className="text-xs font-bold tracking-wider" style={{ color: 'var(--interface-textPrimary)' }}>MOBI</span>
+              </div>
+              <div className="flex items-center gap-2 px-4 py-2 rounded-xl bg-gray-50/70 dark:bg-zinc-800/60 border border-gray-100 dark:border-zinc-700/50">
+                <File className="w-4 h-4 text-emerald-500" />
+                <span className="text-xs font-bold tracking-wider" style={{ color: 'var(--interface-textPrimary)' }}>AZW</span>
+              </div>
+              <div className="flex items-center gap-2 px-4 py-2 rounded-xl bg-gray-50/70 dark:bg-zinc-800/60 border border-gray-100 dark:border-zinc-700/50">
+                <File className="w-4 h-4 text-violet-500" />
+                <span className="text-xs font-bold tracking-wider" style={{ color: 'var(--interface-textPrimary)' }}>AZW3</span>
+              </div>
+              <div className="flex items-center gap-2 px-4 py-2 rounded-xl bg-gray-50/70 dark:bg-zinc-800/60 border border-gray-100 dark:border-zinc-700/50">
+                <File className="w-4 h-4 text-teal-500" />
+                <span className="text-xs font-bold tracking-wider" style={{ color: 'var(--interface-textPrimary)' }}>KFX</span>
               </div>
             </div>
             <p className="text-xs font-medium opacity-50 max-w-[200px] text-center md:text-right" style={{ color: 'var(--interface-textSecondary)' }}>

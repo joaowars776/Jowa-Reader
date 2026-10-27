@@ -1,39 +1,58 @@
-import React, { useState, useEffect } from 'react';
-import { Clock, BookOpen, TrendingUp, Calendar, Search, BarChart3, Home, AlertTriangle, Globe, Settings } from 'lucide-react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { Clock, BookOpen, TrendingUp, Search, BarChart3, Home, Globe, Settings, FileText, X } from 'lucide-react';
 import { ChapterHistoryView } from './ChapterHistoryView';
 import { BookHistoryView } from './BookHistoryView';
 import { OverallStatsView } from './OverallStatsView';
 import { ReadingTrendsChart } from './ReadingTrendsChart';
+import { ActivityLogsView } from './ActivityLogsView';
 import { LanguageSelector } from '../LanguageSelector';
 import { HomePageSettings } from '../HomePageSettings';
-import { getReadingHistoryStats } from '../../utils/reading-tracker';
-import { getPreferences, savePreferences } from '../../utils/storage';
+import { SnowEffect } from '../SnowEffect';
+import { RainEffect } from '../RainEffect';
+import { PetalEffect } from '../PetalEffect';
+import { getReadingHistoryStats, getBookHistory } from '../../utils/reading-tracker';
+import { getPreferences, savePreferences, getCachedPreferences } from '../../utils/storage';
 import { formatDuration } from '../../utils/time-formatter';
-import { getTranslation, initializeLanguage } from '../../utils/translations';
-import { applyInterfaceTheme, getInterfaceTheme } from '../../utils/themes';
+import { getTranslation, initializeLanguage, getCurrentLanguage } from '../../utils/translations';
+import { applyInterfaceTheme, getInterfaceTheme, applyPreferencesTheme, getInterfaceThemeFromPrefs, isHexColorDark } from '../../utils/themes';
 import type { ReadingHistoryStats, TimeFormat, SortOption, FilterOption, ReadingPreferences } from '../../types';
 
 interface ReadingHistoryTabProps {
   onClose?: () => void;
   preferences?: ReadingPreferences;
   onPreferencesChange?: (preferences: ReadingPreferences) => void;
+  initialTab?: 'chapters' | 'books' | 'stats' | 'trends' | 'logs';
 }
 
-type ViewMode = 'chapters' | 'books' | 'stats' | 'trends';
+type ViewMode = 'chapters' | 'books' | 'stats' | 'trends' | 'logs';
 
 export const ReadingHistoryTab: React.FC<ReadingHistoryTabProps> = ({ 
   onClose, 
   preferences: externalPreferences,
-  onPreferencesChange: externalOnPreferencesChange 
+  onPreferencesChange: externalOnPreferencesChange,
+  initialTab
 }) => {
-  const [activeView, setActiveView] = useState<ViewMode>('chapters');
+  const [activeView, setActiveView] = useState<ViewMode>(initialTab || 'chapters');
+
+  useEffect(() => {
+    if (initialTab) {
+      setActiveView(initialTab);
+    }
+  }, [initialTab]);
   const [stats, setStats] = useState<ReadingHistoryStats | null>(null);
-  const [preferences, setPreferences] = useState<ReadingPreferences | null>(null);
+  const [preferences, setPreferences] = useState<ReadingPreferences | null>(() => {
+    return externalPreferences || getCachedPreferences() || null;
+  });
   const [timeFormat, setTimeFormat] = useState<TimeFormat>('auto');
   const [sortBy, setSortBy] = useState<SortOption>('date');
   const [filterBy, setFilterBy] = useState<FilterOption>('all');
+  const [selectedFileType, setSelectedFileType] = useState<'all' | 'epub' | 'pdf' | 'mobi' | 'azw3' | 'kfx' | 'azw'>('all');
+  const [selectedGenre, setSelectedGenre] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
+  const [selectedBookId, setSelectedBookId] = useState<string>('all');
+  const [availableBooks, setAvailableBooks] = useState<{ id: string; title: string; author?: string }[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [allGenres, setAllGenres] = useState<string[]>([]);
   const [showLanguageSelector, setShowLanguageSelector] = useState(false);
   const [showHomePageSettings, setShowHomePageSettings] = useState(false);
 
@@ -51,21 +70,38 @@ export const ReadingHistoryTab: React.FC<ReadingHistoryTabProps> = ({
     }
   }, [externalPreferences]);
 
-  useEffect(() => {
-    loadStats();
-  }, []);
-
-  const loadStats = async () => {
+  const loadStats = useCallback(async (bookId: string = selectedBookId) => {
     try {
       setIsLoading(true);
-      const historyStats = await getReadingHistoryStats();
+      const historyStats = await getReadingHistoryStats(bookId);
       setStats(historyStats);
+      
+      // Load all history to extract unique genres and book list
+      const bookHistory = await getBookHistory();
+      const booksList = bookHistory.map(b => ({
+        id: b.bookId,
+        title: b.bookTitle,
+        author: b.bookAuthor
+      }));
+      setAvailableBooks(booksList);
+
+      const genres = new Set<string>();
+      bookHistory.forEach(book => {
+        if (book.tags) {
+          book.tags.forEach(tag => genres.add(tag));
+        }
+      });
+      setAllGenres(Array.from(genres).sort());
     } catch (error) {
       console.error('Error loading reading history stats:', error);
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [selectedBookId]);
+
+  useEffect(() => {
+    loadStats(selectedBookId);
+  }, [loadStats, selectedBookId]);
 
   const loadPreferences = async () => {
     try {
@@ -78,12 +114,7 @@ export const ReadingHistoryTab: React.FC<ReadingHistoryTabProps> = ({
 
   const handlePreferencesChange = async (newPreferences: ReadingPreferences) => {
     setPreferences(newPreferences);
-    
-    // Apply interface theme immediately
-    if (newPreferences.selectedInterfaceTheme) {
-      const theme = getInterfaceTheme(newPreferences.selectedInterfaceTheme);
-      applyInterfaceTheme(theme);
-    }
+    applyPreferencesTheme(newPreferences);
     
     try {
       await savePreferences(newPreferences);
@@ -99,62 +130,45 @@ export const ReadingHistoryTab: React.FC<ReadingHistoryTabProps> = ({
 
   // Get interface theme styles
   const getInterfaceStyles = () => {
-    if (!preferences?.interfaceColors) {
-      return {
-        backgroundColor: '#ffffff',
-        color: '#1f2937',
-        borderColor: '#e5e7eb',
-        panelBackground: '#ffffff',
-        panelSecondaryBackground: '#f9fafb'
-      };
-    }
+    const theme = getInterfaceThemeFromPrefs(preferences);
+    const colors = theme.colors;
+    const isDark = isHexColorDark(colors.panelBackground || '#ffffff');
 
     return {
-      backgroundColor: preferences.interfaceColors.headerBackground || '#ffffff',
-      color: preferences.interfaceColors.headerText || '#1f2937',
-      borderColor: preferences.interfaceColors.headerBorder || '#e5e7eb',
-      panelBackground: preferences.interfaceColors.panelBackground || '#ffffff',
-      panelSecondaryBackground: preferences.interfaceColors.panelSecondaryBackground || '#f9fafb'
+      backgroundColor: colors.headerBackground || '#ffffff',
+      color: colors.headerText || colors.textPrimary || (isDark ? '#f9fafb' : '#1f2937'),
+      borderColor: colors.borderColor || colors.headerBorder || (isDark ? 'rgba(255, 255, 255, 0.15)' : '#e5e7eb'),
+      panelBackground: colors.panelBackground || '#ffffff',
+      panelSecondaryBackground: colors.panelSecondaryBackground || (isDark ? '#111827' : '#f9fafb'),
+      accent: colors.accent || '#007BFF',
+      textPrimary: colors.textPrimary || (isDark ? '#f9fafb' : '#1f2937'),
+      textSecondary: colors.textSecondary || (isDark ? '#cbd5e1' : '#6b7280'),
+      isDark
     };
   };
 
   const interfaceStyles = getInterfaceStyles();
 
-  if (isLoading) {
-    return (
-      <div 
-        className="min-h-screen flex items-center justify-center transition-all duration-300"
-        style={{ 
-          backgroundColor: interfaceStyles.panelSecondaryBackground,
-          fontFamily: preferences?.applyFontGlobally ? 
-            (preferences.fontFamily === 'Inter' ? 'Inter, sans-serif' : 
-             preferences.fontFamily === 'JetBrains Mono' ? 'JetBrains Mono, monospace' :
-             preferences.fontFamily === 'Crimson Text' ? 'Crimson Text, serif' :
-             preferences.fontFamily === 'Source Sans Pro' ? 'Source Sans Pro, sans-serif' :
-             'Georgia, serif') : undefined
-        }}
-      >
-        <div className="text-center">
-          <Clock className="w-12 h-12 text-blue-600 mx-auto mb-4 animate-pulse" />
-          <p style={{ color: interfaceStyles.color }}>{getTranslation('loadingReadingHistory')}</p>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div 
-      className="min-h-screen transition-all duration-300"
+      className="min-h-screen transition-colors duration-300"
       style={{ 
         backgroundColor: interfaceStyles.panelSecondaryBackground,
         fontFamily: preferences?.applyFontGlobally ? 
-          (preferences.fontFamily === 'Inter' ? 'Inter, sans-serif' : 
-           preferences.fontFamily === 'JetBrains Mono' ? 'JetBrains Mono, monospace' :
-           preferences.fontFamily === 'Crimson Text' ? 'Crimson Text, serif' :
-           preferences.fontFamily === 'Source Sans Pro' ? 'Source Sans Pro, sans-serif' :
+          (preferences.fontFamily === 'Arial' ? 'Arial, Helvetica, sans-serif' : 
+           preferences.fontFamily === 'Inter' ? 'Inter, sans-serif' :
            'Georgia, serif') : undefined
       }}
     >
+      {isLoading ? (
+        <div className="min-h-screen flex items-center justify-center">
+          <div className="text-center">
+            <Clock className="w-12 h-12 text-blue-600 mx-auto mb-4 animate-pulse" />
+            <p style={{ color: interfaceStyles.color }}>{getTranslation('loadingReadingHistory')}</p>
+          </div>
+        </div>
+      ) : (
+        <>
       {/* Header */}
       <header 
         className="shadow-sm border-b transition-all duration-300"
@@ -166,19 +180,6 @@ export const ReadingHistoryTab: React.FC<ReadingHistoryTabProps> = ({
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-4">
-              {/* Home Button */}
-              <button
-                onClick={onClose}
-                className="flex items-center gap-2 px-4 py-2 hover:bg-gray-100 hover:bg-opacity-20 rounded-lg transition-all duration-300 transform hover:scale-105"
-                style={{ color: interfaceStyles.color }}
-                aria-label={getTranslation('backToHome')}
-              >
-                <Home className="w-5 h-5" />
-                <span className="font-medium">{getTranslation('home')}</span>
-              </button>
-
-              <div className="h-6 w-px" style={{ backgroundColor: interfaceStyles.borderColor }}></div>
-
               <div>
                 <h1 className="text-2xl font-bold flex items-center gap-3" style={{ color: interfaceStyles.color }}>
                   <Clock className="w-8 h-8 text-blue-600" />
@@ -193,43 +194,6 @@ export const ReadingHistoryTab: React.FC<ReadingHistoryTabProps> = ({
             </div>
             
             <div className="flex items-center gap-3">
-              {/* Home Page Settings */}
-              <button
-                onClick={() => setShowHomePageSettings(true)}
-                className="p-2 hover:bg-gray-100 hover:bg-opacity-20 rounded-lg transition-all duration-300"
-                style={{ color: interfaceStyles.color }}
-                aria-label={getTranslation('homePageSettings')}
-              >
-                <Settings className="w-5 h-5" />
-              </button>
-
-              {/* Language Selector */}
-              <div className="relative">
-                <button
-                  onClick={() => setShowLanguageSelector(!showLanguageSelector)}
-                  className="p-2 hover:bg-gray-100 hover:bg-opacity-20 rounded-lg transition-all duration-300"
-                  style={{ color: interfaceStyles.color }}
-                  aria-label={getTranslation('language')}
-                >
-                  <Globe className="w-5 h-5" />
-                </button>
-                
-                {showLanguageSelector && (
-                  <div className="absolute top-full right-0 mt-2 z-50">
-                    <div 
-                      className="bg-white rounded-lg shadow-xl border-2 border-gray-300 py-2 min-w-48 animate-fade-in"
-                      style={{
-                        backgroundColor: interfaceStyles.panelBackground,
-                        borderColor: interfaceStyles.borderColor,
-                        boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)'
-                      }}
-                    >
-                      <LanguageSelector onClose={() => setShowLanguageSelector(false)} />
-                    </div>
-                  </div>
-                )}
-              </div>
-
               {/* Time Format Toggle */}
               <select
                 value={timeFormat}
@@ -256,7 +220,37 @@ export const ReadingHistoryTab: React.FC<ReadingHistoryTabProps> = ({
                 { id: 'chapters', label: getTranslation('chapterHistory'), icon: BookOpen },
                 { id: 'books', label: getTranslation('bookHistory'), icon: Clock },
                 { id: 'stats', label: getTranslation('statistics'), icon: TrendingUp },
-                { id: 'trends', label: getTranslation('trends'), icon: BarChart3 }
+                { id: 'trends', label: getTranslation('trends'), icon: BarChart3 },
+                { 
+                  id: 'logs', 
+                  label: (() => {
+                    const l = getCurrentLanguage();
+                    const labels: Record<string, string> = {
+                      pt: 'Log de Atividades',
+                      en: 'Activity Log',
+                      es: 'Registro de Actividades',
+                      fr: 'Journal d’Activité',
+                      de: 'Aktivitätsprotokoll',
+                      it: 'Registro Attività',
+                      ru: 'Журнал активности',
+                      ja: 'アクティビティログ',
+                      ko: '활동 기록',
+                      zh: '活动日志',
+                      ar: 'سجل النشاط',
+                      hi: 'गतिविधि लॉग',
+                      tr: 'Etkinlik Günlüğü',
+                      sw: 'Kumbukumbu ya Shughuli',
+                      bn: 'কার্যকলাপ লগ',
+                      id: 'Log Aktivitas',
+                      yo: 'Akọọlẹ Iṣẹ',
+                      nl: 'Activiteitenlogboek',
+                      th: 'บันทึกกิจกรรม',
+                      ur: 'سرگرمی لاگ'
+                    };
+                    return labels[l] || labels['en'] || 'Activity Log';
+                  })(), 
+                  icon: FileText 
+                }
               ].map((tab) => {
                 const Icon = tab.icon;
                 return (
@@ -282,83 +276,134 @@ export const ReadingHistoryTab: React.FC<ReadingHistoryTabProps> = ({
             </nav>
           </div>
 
-          {/* Search and Filters */}
-          {(activeView === 'chapters' || activeView === 'books') && (
-            <div className="mt-4 flex flex-col sm:flex-row gap-4">
-              {/* Search */}
-              <div className="relative flex-1">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
-                <input
-                  type="text"
-                  placeholder={getTranslation('searchBooksOrChapters')}
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full pl-10 pr-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-300"
+          {/* Search, Book Filter, and Sub-filters */}
+          {(activeView === 'chapters' || activeView === 'books' || activeView === 'stats' || activeView === 'trends') && (
+            <div className="mt-4 flex flex-col md:flex-row flex-wrap gap-3 items-stretch">
+              {/* Book Selector Filter */}
+              <div className="relative min-w-[200px] flex-shrink-0">
+                <BookOpen className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4 pointer-events-none" />
+                <select
+                  id="reading-history-book-filter"
+                  value={selectedBookId}
+                  onChange={(e) => setSelectedBookId(e.target.value)}
+                  className="w-full pl-9 pr-8 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-300 font-bold text-xs truncate cursor-pointer shadow-xs"
                   style={{
                     backgroundColor: interfaceStyles.panelBackground,
-                    borderColor: interfaceStyles.borderColor,
-                    color: interfaceStyles.color
+                    borderColor: selectedBookId !== 'all' ? (interfaceStyles.isDark ? '#60a5fa' : '#2563eb') : interfaceStyles.borderColor,
+                    color: selectedBookId !== 'all' ? (interfaceStyles.isDark ? '#93c5fd' : '#1d4ed8') : interfaceStyles.color
                   }}
-                />
+                  title={localStorage.getItem('novel_reader_language') === 'pt' ? 'Filtrar por livro' : 'Filter by book'}
+                >
+                  <option value="all">
+                    {localStorage.getItem('novel_reader_language') === 'pt' ? '📚 Todos os Livros' : '📚 All Books'}
+                  </option>
+                  {availableBooks.map(book => (
+                    <option key={book.id} value={book.id}>
+                      📖 {book.title} {book.author ? `(${book.author})` : ''}
+                    </option>
+                  ))}
+                </select>
               </div>
 
-              {/* Sort */}
-              <select
-                value={sortBy}
-                onChange={(e) => setSortBy(e.target.value as SortOption)}
-                className="px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-300"
-                style={{
-                  backgroundColor: interfaceStyles.panelBackground,
-                  borderColor: interfaceStyles.borderColor,
-                  color: interfaceStyles.color
-                }}
-              >
-                <option value="date">{getTranslation('sortByDate')}</option>
-                <option value="duration">{getTranslation('sortByDuration')}</option>
-                <option value="book">{getTranslation('sortByBook')}</option>
-                <option value="chapter">{getTranslation('sortByChapter')}</option>
-              </select>
+              {(activeView === 'chapters' || activeView === 'books') && (
+                <>
+                  {/* Search */}
+                  <div className="relative flex-1 min-w-[180px]">
+                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+                    <input
+                      type="text"
+                      placeholder={getTranslation('searchBooksOrChapters')}
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      className="w-full pl-10 pr-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-300 text-xs"
+                      style={{
+                        backgroundColor: interfaceStyles.panelBackground,
+                        borderColor: interfaceStyles.borderColor,
+                        color: interfaceStyles.color
+                      }}
+                    />
+                  </div>
 
-              {/* Filter */}
-              <select
-                value={filterBy}
-                onChange={(e) => setFilterBy(e.target.value as FilterOption)}
-                className="px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-300"
-                style={{
-                  backgroundColor: interfaceStyles.panelBackground,
-                  borderColor: interfaceStyles.borderColor,
-                  color: interfaceStyles.color
-                }}
-              >
-                <option value="all">{getTranslation('allTime')}</option>
-                <option value="today">{getTranslation('today')}</option>
-                <option value="week">{getTranslation('thisWeek')}</option>
-                <option value="month">{getTranslation('thisMonth')}</option>
-                <option value="completed">{getTranslation('completedOnly')}</option>
-                <option value="in-progress">{getTranslation('inProgress')}</option>
-              </select>
+                  {/* Sort */}
+                  <select
+                    value={sortBy}
+                    onChange={(e) => setSortBy(e.target.value as SortOption)}
+                    className="px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-300 text-xs font-semibold"
+                    style={{
+                      backgroundColor: interfaceStyles.panelBackground,
+                      borderColor: interfaceStyles.borderColor,
+                      color: interfaceStyles.color
+                    }}
+                  >
+                    <option value="date">{getTranslation('sortByDate')}</option>
+                    <option value="duration">{getTranslation('sortByDuration')}</option>
+                    <option value="book">{getTranslation('sortByBook')}</option>
+                    <option value="chapter">{getTranslation('sortByChapter')}</option>
+                  </select>
+
+                  {/* Filter */}
+                  <select
+                    value={filterBy}
+                    onChange={(e) => setFilterBy(e.target.value as FilterOption)}
+                    className="px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-300 text-xs font-semibold"
+                    style={{
+                      backgroundColor: interfaceStyles.panelBackground,
+                      borderColor: interfaceStyles.borderColor,
+                      color: interfaceStyles.color
+                    }}
+                  >
+                    <option value="all">{getTranslation('allTime')}</option>
+                    <option value="today">{getTranslation('today')}</option>
+                    <option value="week">{getTranslation('thisWeek')}</option>
+                    <option value="month">{getTranslation('thisMonth')}</option>
+                    <option value="completed">{getTranslation('completedOnly')}</option>
+                    <option value="in-progress">{getTranslation('inProgress')}</option>
+                  </select>
+
+                  {/* File Type Filter */}
+                  <select
+                    value={selectedFileType}
+                    onChange={(e) => setSelectedFileType(e.target.value as any)}
+                    className="px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-300 text-xs font-semibold"
+                    style={{
+                      backgroundColor: interfaceStyles.panelBackground,
+                      borderColor: interfaceStyles.borderColor,
+                      color: interfaceStyles.color
+                    }}
+                  >
+                    <option value="all">{getTranslation('allTypes')}</option>
+                    <option value="epub">{getTranslation('epub')}</option>
+                    <option value="pdf">{getTranslation('pdf')}</option>
+                    <option value="mobi">MOBI</option>
+                    <option value="azw">AZW</option>
+                    <option value="azw3">AZW3</option>
+                    <option value="kfx">KFX</option>
+                  </select>
+
+                  {/* Genre Filter */}
+                  <select
+                    value={selectedGenre}
+                    onChange={(e) => setSelectedGenre(e.target.value)}
+                    className="px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-300 text-xs font-semibold"
+                    style={{
+                      backgroundColor: interfaceStyles.panelBackground,
+                      borderColor: interfaceStyles.borderColor,
+                      color: interfaceStyles.color
+                    }}
+                  >
+                    <option value="all">{getTranslation('allGenres')}</option>
+                    {allGenres.map(genre => (
+                      <option key={genre} value={genre}>
+                        {getTranslation(genre.toLowerCase()) || genre}
+                      </option>
+                    ))}
+                  </select>
+                </>
+              )}
             </div>
           )}
         </div>
       </header>
-
-      {/* Feature Note */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-4">
-        <div 
-          className="border-l-2 p-2 text-sm"
-          style={{ backgroundColor: '#fffbe6', borderColor: '#facc15' }}
-        >
-          <div className="flex items-center">
-            <AlertTriangle className="w-4 h-4 mr-2" style={{ color: '#854d0e' }} />
-            <div>
-              <p style={{ color: '#854d0e' }}>
-                <span className="font-medium">{getTranslation('featureNote')}:</span>{' '}
-                {getTranslation('featureAccuracyNote')}
-              </p>
-            </div>
-          </div>
-        </div>
-      </div>
 
       {/* Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -367,8 +412,11 @@ export const ReadingHistoryTab: React.FC<ReadingHistoryTabProps> = ({
             timeFormat={timeFormat}
             sortBy={sortBy}
             filterBy={filterBy}
+            fileTypeFilter={selectedFileType}
+            genreFilter={selectedGenre}
             searchQuery={searchQuery}
             preferences={preferences}
+            selectedBookId={selectedBookId}
           />
         )}
         
@@ -377,8 +425,15 @@ export const ReadingHistoryTab: React.FC<ReadingHistoryTabProps> = ({
             timeFormat={timeFormat}
             sortBy={sortBy}
             filterBy={filterBy}
+            fileTypeFilter={selectedFileType}
+            genreFilter={selectedGenre}
             searchQuery={searchQuery}
             preferences={preferences}
+            selectedBookId={selectedBookId}
+            onSelectBook={(bookId) => {
+              setSelectedBookId(bookId);
+              setActiveView('chapters');
+            }}
           />
         )}
         
@@ -394,6 +449,14 @@ export const ReadingHistoryTab: React.FC<ReadingHistoryTabProps> = ({
           <ReadingTrendsChart 
             timeFormat={timeFormat} 
             preferences={preferences}
+            selectedBookId={selectedBookId}
+          />
+        )}
+
+        {activeView === 'logs' && (
+          <ActivityLogsView 
+            preferences={preferences}
+            onPreferencesChange={handlePreferencesChange}
           />
         )}
       </main>
@@ -405,6 +468,19 @@ export const ReadingHistoryTab: React.FC<ReadingHistoryTabProps> = ({
           onPreferencesChange={handlePreferencesChange}
           onClose={() => setShowHomePageSettings(false)}
         />
+      )}
+
+      {/* Snow/Rain overlays if active for interface theme */}
+      {preferences?.selectedInterfaceTheme === 'snow' && (
+        <SnowEffect density={preferences?.snowDensity} speed={preferences?.snowSpeed} />
+      )}
+      {preferences?.selectedInterfaceTheme === 'rain' && (
+        <RainEffect density={preferences?.snowDensity} speed={preferences?.snowSpeed} />
+      )}
+      {preferences?.selectedInterfaceTheme === 'aurora' && (
+        <PetalEffect density={preferences?.snowDensity} speed={preferences?.snowSpeed} />
+      )}
+        </>
       )}
     </div>
   );
